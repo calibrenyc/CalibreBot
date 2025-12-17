@@ -829,10 +829,16 @@ async def update_bot(ctx):
         if code != 0 and "not a git repository" in error.lower():
             await ctx.send("⚠️ Git repository not detected. Attempting to initialize and repair...")
 
-            # Determine URL with Token if available
+            # Determine URL
+            # Priority: GIT_REPO_URL (SSH/Custom) > GITHUB_TOKEN (HTTPS) > Default HTTPS
+            custom_url = os.getenv('GIT_REPO_URL')
             gh_token = os.getenv('GITHUB_TOKEN')
+
             repo_url = "https://github.com/calibrenyc/CalibreBot.git"
-            if gh_token:
+
+            if custom_url:
+                repo_url = custom_url
+            elif gh_token:
                 repo_url = f"https://{gh_token}@github.com/calibrenyc/CalibreBot.git"
 
             # Repair sequence
@@ -849,7 +855,12 @@ async def update_bot(ctx):
                     # Ignore remote exists error, but if it exists, update url to be safe
                     if "already exists" in e:
                          await run_cmd(f"git remote set-url origin {repo_url}")
-                         continue
+                         # Retry the command that failed if it wasn't just setting remote
+                         if "remote add" not in cmd:
+                             # Actually if set-url succeeded, we should retry the fetch/reset?
+                             # Simplest is to just continue loop, but "remote add" was the step that failed.
+                             # Next step is fetch.
+                             continue
 
                     await ctx.send(f"Repair failed at step: `{cmd}`\nError: `{e}`")
                     return
@@ -860,20 +871,27 @@ async def update_bot(ctx):
         elif code != 0:
             # Check for Authentication Failed
             if "authentication failed" in error.lower() or "could not read username" in error.lower():
+                 custom_url = os.getenv('GIT_REPO_URL')
                  gh_token = os.getenv('GITHUB_TOKEN')
-                 if gh_token:
-                     await ctx.send("⚠️ Authentication failed. Retrying with configured GITHUB_TOKEN...")
-                     auth_url = f"https://{gh_token}@github.com/calibrenyc/CalibreBot.git"
+
+                 new_url = None
+                 if custom_url:
+                     new_url = custom_url
+                 elif gh_token:
+                     new_url = f"https://{gh_token}@github.com/calibrenyc/CalibreBot.git"
+
+                 if new_url:
+                     await ctx.send("⚠️ Authentication failed. Retrying with configured Repo URL/Token...")
 
                      # Update remote and retry pull
-                     await run_cmd(f"git remote set-url origin {auth_url}")
+                     await run_cmd(f"git remote set-url origin {new_url}")
                      code, output, error = await run_cmd("git pull origin main")
 
                      if code != 0:
                          await ctx.send(f"Update failed after retry:\n```\n{error}\n```")
                          return
                  else:
-                     await ctx.send(f"❌ Update failed: Authentication required. Please add `GITHUB_TOKEN` to your `.env` file.\n```\n{error}\n```")
+                     await ctx.send(f"❌ Update failed: Authentication required. Please add `GIT_REPO_URL` (for SSH) or `GITHUB_TOKEN` to your `.env` file.\n```\n{error}\n```")
                      return
             else:
                 await ctx.send(f"Update failed:\n```\n{error}\n```")
