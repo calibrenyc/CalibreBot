@@ -236,7 +236,25 @@ async def search(ctx: commands.Context, *, query: str):
         all_results = online_fix_results + cs_rin_results
         print(f"Total results found: {len(all_results)}")
         
-        if not all_results:
+        # Filter Logic
+        strict_results = []
+        clean_query = query.strip().lower()
+
+        for res in all_results:
+            if clean_query in res['title'].lower():
+                strict_results.append(res)
+
+        final_results = []
+        msg_content = ""
+
+        if strict_results:
+            final_results = strict_results
+            msg_content = f"Found {len(final_results)} results for '{query}':"
+        elif all_results:
+            final_results = all_results
+            msg_content = f"Hey here are similar titles found with your search '{query}':"
+        else:
+             # No results at all
             msg = f"No results found for '{query}'."
             if ctx.interaction:
                 await ctx.send(msg, ephemeral=True)
@@ -246,15 +264,14 @@ async def search(ctx: commands.Context, *, query: str):
                 await asyncio.sleep(5)
                 await sent_msg.delete()
             return
-            
+
         # Pass ctx.author so we know who to tag in the thread
-        view = SearchView(all_results, ctx.author)
-        msg = f"Found {len(all_results)} results for '{query}':"
+        view = SearchView(final_results, ctx.author)
         
         if ctx.interaction:
-            await ctx.send(msg, view=view, ephemeral=True)
+            await ctx.send(msg_content, view=view, ephemeral=True)
         else:
-            await ctx.send(msg, view=view)
+            await ctx.send(msg_content, view=view)
             
         print("Response sent to user.")
         
