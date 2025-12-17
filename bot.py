@@ -5,6 +5,7 @@ from discord.ui import Select, View
 from dotenv import load_dotenv
 import scrapers
 import asyncio
+import random
 from config_manager import config_manager
 
 # Load environment variables
@@ -167,6 +168,9 @@ class SearchResultSelect(Select):
             selected_index = int(selected_value)
             selected_result = self.results[selected_index]
             
+            # Truncate title to 100 chars for Discord Thread Name limit
+            thread_name = selected_result['title'][:100]
+
             # --- Get Configured Destination Channel ---
             guild_id = interaction.guild_id
             config = config_manager.get_guild_config(guild_id)
@@ -202,14 +206,14 @@ class SearchResultSelect(Select):
             # 1. Check active threads
             if hasattr(destination_channel, 'threads'):
                 for t in destination_channel.threads:
-                    if t.name == selected_result['title']:
+                    if t.name == thread_name:
                         existing_thread = t
                         break
 
             # 2. Check archived threads (if not found in active)
             if not existing_thread and hasattr(destination_channel, 'archived_threads'):
                 async for t in destination_channel.archived_threads(limit=None):
-                    if t.name == selected_result['title']:
+                    if t.name == thread_name:
                         existing_thread = t
                         break
 
@@ -224,7 +228,7 @@ class SearchResultSelect(Select):
                 return
 
             # --- CREATE NEW THREAD ---
-            print(f"Creating thread for '{selected_result['title']}' in {destination_channel.name} ({destination_channel.type})...")
+            print(f"Creating thread for '{thread_name}' in {destination_channel.name} ({destination_channel.type})...")
             
             thread = None
             message_content = f"{self.original_user.mention} Here is the link you requested:\n{selected_result['link']}"
@@ -232,7 +236,7 @@ class SearchResultSelect(Select):
             if isinstance(destination_channel, discord.ForumChannel):
                 # Forum Channel creation
                 thread_with_message = await destination_channel.create_thread(
-                    name=selected_result['title'],
+                    name=thread_name,
                     content=message_content
                 )
                 thread = thread_with_message.thread
@@ -240,7 +244,7 @@ class SearchResultSelect(Select):
             elif isinstance(destination_channel, discord.TextChannel):
                 # Text Channel creation
                 thread = await destination_channel.create_thread(
-                    name=selected_result['title'],
+                    name=thread_name,
                     type=discord.ChannelType.public_thread,
                     auto_archive_duration=1440
                 )
@@ -848,8 +852,6 @@ class Fun(commands.Cog):
 
         await interaction.response.send_message(f"Starting random move for {user.mention} ({rounds} times)...", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} started random_move on {user.mention} ({rounds} times).", discord.Color.purple())
-
-        import random
 
         try:
             for i in range(rounds):
