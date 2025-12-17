@@ -207,7 +207,7 @@ class SearchView(View):
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
 
-@bot.hybrid_command(name="search", description="Search for games on Online-Fix and CS.RIN.RU")
+@bot.hybrid_command(name="search", description="Search for games on Online-Fix and Rutor")
 @discord.app_commands.describe(query="The game to search for")
 async def search(ctx: commands.Context, *, query: str):
     print(f"Received search command for '{query}' from {ctx.author}")
@@ -231,9 +231,9 @@ async def search(ctx: commands.Context, *, query: str):
         # Run scrapers
         print("Starting scrapers...")
         online_fix_results = await bot.loop.run_in_executor(None, scrapers.search_online_fix, query)
-        cs_rin_results = await bot.loop.run_in_executor(None, scrapers.search_cs_rin, query)
+        rutor_results = await bot.loop.run_in_executor(None, scrapers.search_rutor, query)
         
-        all_results = online_fix_results + cs_rin_results
+        all_results = online_fix_results + rutor_results
         print(f"Total results found: {len(all_results)}")
         
         # Filter Logic

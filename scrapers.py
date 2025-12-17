@@ -1,18 +1,10 @@
 import cloudscraper
 from bs4 import BeautifulSoup
-import urllib.parse
 import re
-# Try importing the new 'ddgs' package, fallback to old 'duckduckgo_search' if needed
-try:
-    from ddgs import DDGS
-except ImportError:
-    try:
-        from duckduckgo_search import DDGS
-    except ImportError:
-        raise ImportError("Could not import 'ddgs' or 'duckduckgo_search'. Please run 'pip install -r requirements.txt'.")
 
 # --- Configuration ---
 ONLINE_FIX_URL = "https://online-fix.me/index.php?do=search"
+RUTOR_URL = "https://rutor.org.in/index.php?do=search"
 
 BLACKLIST_TITLES = {
     "Gameranger",
@@ -33,12 +25,6 @@ def clean_title(title):
     # Remove "по сети" (Cyrillic) and "po seti" (Latin)
     title = re.sub(r'\s+по сети', '', title, flags=re.IGNORECASE)
     title = re.sub(r'\s+po seti', '', title, flags=re.IGNORECASE)
-    
-    # Remove CS.RIN.RU common prefixes/suffixes
-    title = title.replace("CS.RIN.RU - Steam Underground Community", "")
-    title = title.replace(" • View topic -", "")
-    title = title.replace("View topic -", "")
-    title = title.replace("CS RIN - Steam Underground", "")
     
     # Remove excessive whitespace
     title = " ".join(title.split())
@@ -112,42 +98,55 @@ def search_online_fix(query):
     print(f"[Scraper] Online-Fix found {len(results)} results.")
     return results
 
-def search_cs_rin(query):
+def search_rutor(query):
     """
-    Searches cs.rin.ru/forum using ddgs (DuckDuckGo Search) library.
+    Searches rutor.org.in for the query using a POST request.
     """
     results = []
-    print(f"[Scraper] Searching CS.RIN.RU (via DDGS) for '{query}'...")
+    print(f"[Scraper] Searching Rutor for '{query}'...")
     
     try:
-        search_query = f'site:cs.rin.ru/forum {query}'
+        scraper = cloudscraper.create_scraper()
+
+        data = {
+            "do": "search",
+            "subaction": "search",
+            "story": query
+        }
         
-        # Use DDGS context manager
-        # Note: DDGS().text() returns an iterator of dicts
-        with DDGS() as ddgs:
-            ddg_results = ddgs.text(search_query, max_results=10)
-            
-            for r in ddg_results:
-                raw_title = r.get('title')
-                href = r.get('href')
+        response = scraper.post(RUTOR_URL, data=data)
+        if response.status_code != 200:
+            print(f"[Scraper] Rutor search failed with status: {response.status_code}")
+            return results
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Select titles
+        titles = soup.select("div.dtitle > a")
+
+        for t in titles:
+            try:
+                raw_title = t.get_text(strip=True)
+                href = t['href']
                 
-                # Verify it is actually from cs.rin.ru and is a topic
-                if href and "cs.rin.ru" in href and "viewtopic.php" in href:
-                     title = clean_title(raw_title)
-                     
-                     if not title:
-                         continue # Skip if empty or blacklisted
-                         
-                     results.append({
-                        "title": title,
-                        "link": href,
-                        "source": "cs.rin.ru"
-                     })
+                title = clean_title(raw_title)
+
+                if not title:
+                    continue
+
+                results.append({
+                    "title": title,
+                    "link": href,
+                    "source": "rutor.org.in"
+                })
+            except Exception as e:
+                print(f"[Scraper] Error parsing rutor title: {e}")
+                continue
 
     except Exception as e:
-        print(f"[Scraper] Error searching cs.rin.ru via DDGS: {e}")
+        print(f"[Scraper] Error searching rutor: {e}")
         
-    print(f"[Scraper] CS.RIN.RU found {len(results)} results.")
+    print(f"[Scraper] Rutor found {len(results)} results.")
     return results
 
 if __name__ == "__main__":
@@ -157,7 +156,7 @@ if __name__ == "__main__":
     for r in of_res[:3]:
         print(r)
         
-    # Test CS RIN
-    cs_res = search_cs_rin("elden ring")
-    for r in cs_res[:3]:
+    # Test Rutor
+    rutor_res = search_rutor("cyberpunk")
+    for r in rutor_res[:3]:
         print(r)
