@@ -268,8 +268,12 @@ async def search(ctx: commands.Context, *, query: str):
         # Pass ctx.author so we know who to tag in the thread
         view = SearchView(final_results, ctx.author)
         
+        # Ensure we only send one message
         if ctx.interaction:
-            await ctx.send(msg_content, view=view, ephemeral=True)
+            if not ctx.interaction.response.is_done():
+                 await ctx.send(msg_content, view=view, ephemeral=True)
+            else:
+                 await ctx.interaction.followup.send(msg_content, view=view, ephemeral=True)
         else:
             await ctx.send(msg_content, view=view)
             
