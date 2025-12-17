@@ -77,9 +77,9 @@ class ThreadExistsView(View):
 
 class SearchResultSelect(Select):
     def __init__(self, results, original_interaction_user):
-        # Limit to 25 options (Discord limit)
+        # Limit to 24 options to leave room for "None of the above" (Discord limit 25)
         options = []
-        for i, res in enumerate(results[:25]):
+        for i, res in enumerate(results[:24]):
             # Truncate title if too long
             label = res['title'][:95] + "..." if len(res['title']) > 95 else res['title']
             description = f"Source: {res['source']}"
@@ -89,6 +89,14 @@ class SearchResultSelect(Select):
                 value=str(i)
             ))
         
+        # Add "None of the above" option
+        options.append(discord.SelectOption(
+            label="None of the options above",
+            description="Search again with a specific name",
+            value="none_of_above",
+            emoji="❌"
+        ))
+
         super().__init__(placeholder="Select a game to create a thread...", min_values=1, max_values=1, options=options)
         self.results = results
         self.original_user = original_interaction_user
@@ -96,7 +104,44 @@ class SearchResultSelect(Select):
     async def callback(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
-            selected_index = int(self.values[0])
+            selected_value = self.values[0]
+
+            # Handle "None of the above"
+            if selected_value == "none_of_above":
+                # Delete the original dropdown message to clean up
+                if interaction.message:
+                    await interaction.message.delete()
+                else:
+                    await interaction.delete_original_response()
+
+                # Send prompt for new search
+                await interaction.followup.send(
+                    f"{self.original_user.mention} Please type the **exact** game title you are looking for below.",
+                    ephemeral=True
+                )
+
+                def check(m):
+                    return m.author == self.original_user and m.channel == interaction.channel
+
+                try:
+                    # Wait for user input (30 seconds timeout)
+                    msg = await bot.wait_for('message', check=check, timeout=30.0)
+
+                    # Delete the user's input message to keep channel clean
+                    try:
+                        await msg.delete()
+                    except:
+                        pass
+
+                    # Trigger search again with new query
+                    new_query = msg.content
+                    await perform_search(interaction, new_query, self.original_user)
+
+                except asyncio.TimeoutError:
+                    await interaction.followup.send("Search timed out. Please try again.", ephemeral=True)
+                return
+
+            selected_index = int(selected_value)
             selected_result = self.results[selected_index]
             
             # Determine destination channel (Forum Channel)
@@ -141,10 +186,10 @@ class SearchResultSelect(Select):
             if existing_thread:
                 # Ask user for confirmation
                 view = ThreadExistsView(existing_thread, self.original_user, selected_result['link'])
-                await interaction.followup.edit_message(
-                    message_id=interaction.message.id,
+                await interaction.followup.send(
                     content=f"A thread for '{selected_result['title']}' already exists: {existing_thread.mention}.\nIs this the game you are looking for?",
-                    view=view
+                    view=view,
+                    ephemeral=True
                 )
                 return
 
@@ -203,39 +248,40 @@ class SearchView(View):
         super().__init__()
         self.add_item(SearchResultSelect(results, original_user))
 
-@bot.event
-async def on_ready():
-    print(f'Logged in as {bot.user} (ID: {bot.user.id})')
+async def perform_search(interaction_or_ctx, query, user):
+    """
+    Shared search logic to be used by the command and the retry flow.
+    interaction_or_ctx: can be Context (from command) or Interaction (from retry)
+    """
+    # Helper to send messages appropriately
+    async def send_msg(content, view=None, ephemeral=True):
+        if isinstance(interaction_or_ctx, commands.Context):
+             if view:
+                 await interaction_or_ctx.send(content, view=view)
+             else:
+                 msg = await interaction_or_ctx.send(content)
+                 # Auto-delete plain messages after delay if in public channel
+                 await asyncio.sleep(5)
+                 try: await msg.delete()
+                 except: pass
+        else:
+             # It's an interaction
+             if not interaction_or_ctx.response.is_done():
+                 await interaction_or_ctx.response.send_message(content, view=view, ephemeral=ephemeral)
+             else:
+                 await interaction_or_ctx.followup.send(content, view=view, ephemeral=ephemeral)
 
-@bot.hybrid_command(name="search", description="Search for games on Online-Fix and Rutor")
-@discord.app_commands.describe(query="The game to search for")
-async def search(ctx: commands.Context, *, query: str):
-    print(f"Received search command for '{query}' from {ctx.author}")
-    
-    # 1. Handle auto-deletion of request message (if prefix command)
-    if not ctx.interaction:
-        try:
-            await ctx.message.delete()
-        except discord.Forbidden:
-            print("Missing permissions to delete user message.")
-        except Exception as e:
-            print(f"Error deleting message: {e}")
+    print(f"Performing search for '{query}'...")
 
-    # Defer response
-    if ctx.interaction:
-        await ctx.defer(ephemeral=True)
-    else:
-        await ctx.typing()
-    
     try:
         # Run scrapers
-        print("Starting scrapers...")
+        # Note: We need 'bot' here. Since this is outside class, we use the global 'bot' instance.
         online_fix_results = await bot.loop.run_in_executor(None, scrapers.search_online_fix, query)
         rutor_results = await bot.loop.run_in_executor(None, scrapers.search_rutor, query)
-        
+
         all_results = online_fix_results + rutor_results
         print(f"Total results found: {len(all_results)}")
-        
+
         # Filter Logic
         strict_results = []
         clean_query = query.strip().lower()
@@ -255,37 +301,45 @@ async def search(ctx: commands.Context, *, query: str):
             msg_content = f"Hey here are similar titles found with your search '{query}':"
         else:
              # No results at all
-            msg = f"No results found for '{query}'."
-            if ctx.interaction:
-                await ctx.send(msg, ephemeral=True)
-            else:
-                # Send ephemeral-like message by deleting it after delay
-                sent_msg = await ctx.send(msg)
-                await asyncio.sleep(5)
-                await sent_msg.delete()
+            await send_msg(f"No results found for '{query}'.")
             return
 
-        # Pass ctx.author so we know who to tag in the thread
-        view = SearchView(final_results, ctx.author)
-        
-        # Ensure we only send one message
-        if ctx.interaction:
-            if not ctx.interaction.response.is_done():
-                 await ctx.send(msg_content, view=view, ephemeral=True)
-            else:
-                 await ctx.interaction.followup.send(msg_content, view=view, ephemeral=True)
-        else:
-            await ctx.send(msg_content, view=view)
-            
+        # Pass user so we know who to tag in the thread
+        view = SearchView(final_results, user)
+        await send_msg(msg_content, view=view)
+
         print("Response sent to user.")
-        
+
     except Exception as e:
         print(f"Error during search: {e}")
-        error_msg = f"An error occurred while searching: {e}"
-        if ctx.interaction:
-            await ctx.send(error_msg, ephemeral=True)
-        else:
-            await ctx.send(error_msg)
+        await send_msg(f"An error occurred while searching: {e}")
+
+@bot.event
+async def on_ready():
+    print(f'Logged in as {bot.user} (ID: {bot.user.id})')
+
+@bot.hybrid_command(name="search", description="Search for games on Online-Fix and Rutor")
+@discord.app_commands.describe(query="The game to search for")
+async def search(ctx: commands.Context, *, query: str):
+    print(f"Received search command for '{query}' from {ctx.author}")
+
+    # 1. Handle auto-deletion of request message (if prefix command)
+    if not ctx.interaction:
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            print("Missing permissions to delete user message.")
+        except Exception as e:
+            print(f"Error deleting message: {e}")
+
+    # Defer response
+    if ctx.interaction:
+        await ctx.defer(ephemeral=True)
+    else:
+        await ctx.typing()
+
+    # Delegate to helper
+    await perform_search(ctx, query, ctx.author)
 
 @bot.hybrid_command(name="clear", description="Clear the last 10 messages (Owner Role only)")
 @discord.app_commands.describe(amount="Number of messages to clear (default 10)")
