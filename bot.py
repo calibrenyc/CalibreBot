@@ -719,20 +719,20 @@ class ConfigGroup(commands.GroupCog, name="config"):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @discord.app_commands.command(name="sync", description="Force sync slash commands (Admin only)")
-    async def sync_commands(self, interaction: discord.Interaction):
-        if not interaction.permissions.administrator:
-            return await interaction.response.send_message("You need Administrator permissions.", ephemeral=True)
+    # No @app_commands here because we want a hybrid/text command logic
+    @commands.command(name="sync", help="Force sync commands (Admin only)")
+    async def sync_commands(self, ctx):
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You need Administrator permissions.", delete_after=5)
 
-        await interaction.response.defer(ephemeral=True)
+        await ctx.send("Syncing commands...")
         try:
-            # Sync guild commands
-            synced = await self.bot.tree.sync(guild=interaction.guild)
-            # Sync global (optional, but good for hybrid)
-            await self.bot.tree.sync()
-            await interaction.followup.send(f"Synced {len(synced)} commands to this guild.", ephemeral=True)
+            # Sync to current guild
+            self.bot.tree.copy_global_to(guild=ctx.guild)
+            synced = await self.bot.tree.sync(guild=ctx.guild)
+            await ctx.send(f"Synced {len(synced)} commands to this guild.")
         except Exception as e:
-            await interaction.followup.send(f"Failed to sync: {e}", ephemeral=True)
+            await ctx.send(f"Failed to sync: {e}")
 
 # --- MODERATION COG ---
 class Moderation(commands.Cog):
@@ -902,6 +902,54 @@ async def search(ctx: commands.Context, *, query: str):
 
     # Delegate to helper
     await perform_search(ctx, query, ctx.author)
+
+@bot.hybrid_command(name="showcommands", description="Show all available commands")
+async def show_commands(ctx: commands.Context):
+    embed = discord.Embed(title="Bot Commands Help", color=discord.Color.blue())
+
+    # 1. Config Commands
+    config_cmds = []
+    config_cog = bot.get_cog("config")
+    if config_cog:
+        for cmd in config_cog.walk_app_commands():
+            config_cmds.append(f"`/{cmd.name}`: {cmd.description}")
+
+    if config_cmds:
+        embed.add_field(name="Configuration (Admin/Mod)", value="\n".join(config_cmds), inline=False)
+
+    # 2. Moderation Commands
+    mod_cmds = []
+    mod_cog = bot.get_cog("Moderation")
+    if mod_cog:
+        for cmd in mod_cog.walk_app_commands():
+            mod_cmds.append(f"`/{cmd.name}`: {cmd.description}")
+
+    if mod_cmds:
+        embed.add_field(name="Moderation", value="\n".join(mod_cmds), inline=False)
+
+    # 3. Fun Commands
+    fun_cmds = []
+    fun_cog = bot.get_cog("Fun")
+    if fun_cog:
+        for cmd in fun_cog.walk_app_commands():
+            fun_cmds.append(f"`/{cmd.name}`: {cmd.description}")
+
+    if fun_cmds:
+        embed.add_field(name="Fun", value="\n".join(fun_cmds), inline=False)
+
+    # 4. General/Global Commands
+    general_cmds = [
+        "`/search <query>`: Search for games on Online-Fix and FitGirl.",
+        "`/clear <amount>`: Clear messages.",
+        "`/setup`: Run the interactive setup wizard."
+    ]
+    embed.add_field(name="General", value="\n".join(general_cmds), inline=False)
+
+    # Send
+    if ctx.interaction:
+        await ctx.send(embed=embed, ephemeral=True)
+    else:
+        await ctx.send(embed=embed)
 
 @bot.hybrid_command(name="clear", description="Clear the last 10 messages (Owner Role only)")
 @discord.app_commands.describe(amount="Number of messages to clear (default 10)")
