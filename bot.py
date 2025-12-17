@@ -827,9 +827,13 @@ class Fun(commands.Cog):
         await interaction.response.send_message("You do not have permission to use fun commands.", ephemeral=True)
         return False
 
-    @discord.app_commands.command(name="random_move", description="Randomly move a user between voice channels 10 times")
-    @discord.app_commands.describe(user="The user to move")
-    async def random_move(self, interaction: discord.Interaction, user: discord.Member):
+    @discord.app_commands.command(name="random_move", description="Randomly move a user between voice channels")
+    @discord.app_commands.describe(user="The user to move", rounds="Number of moves (1-10, default 10)")
+    async def random_move(self, interaction: discord.Interaction, user: discord.Member, rounds: int = 10):
+        # Validate rounds
+        if rounds < 1: rounds = 1
+        if rounds > 10: rounds = 10
+
         if not user.voice or not user.voice.channel:
             await interaction.response.send_message(f"{user.mention} is not in a voice channel.", ephemeral=True)
             return
@@ -840,13 +844,15 @@ class Fun(commands.Cog):
             await interaction.response.send_message("Not enough voice channels to perform random moves.", ephemeral=True)
             return
 
-        await interaction.response.send_message(f"Starting random move for {user.mention}...", ephemeral=True)
-        await log_audit(interaction.guild, f"{interaction.user.mention} started random_move on {user.mention}.", discord.Color.purple())
+        original_channel = user.voice.channel
+
+        await interaction.response.send_message(f"Starting random move for {user.mention} ({rounds} times)...", ephemeral=True)
+        await log_audit(interaction.guild, f"{interaction.user.mention} started random_move on {user.mention} ({rounds} times).", discord.Color.purple())
 
         import random
 
         try:
-            for i in range(10):
+            for i in range(rounds):
                 # Check if user is still connected
                 if not user.voice:
                     break
@@ -866,9 +872,16 @@ class Fun(commands.Cog):
                     await interaction.followup.send("I don't have permission to move this user.", ephemeral=True)
                     return
                 except Exception:
-                    pass # Ignore move errors (e.g. user disconnected)
+                    pass # Ignore move errors
 
                 await asyncio.sleep(1.5) # Sleep to avoid rate limits
+
+            # Move back to original channel if possible
+            if user.voice and original_channel:
+                try:
+                    await user.move_to(original_channel, reason="Returning to original channel")
+                except:
+                    pass
 
             await interaction.followup.send(f"Finished moving {user.mention}.", ephemeral=True)
 
