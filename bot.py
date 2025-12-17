@@ -28,6 +28,53 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
+class ThreadExistsView(View):
+    def __init__(self, thread, user, link_content):
+        super().__init__()
+        self.thread = thread
+        self.user = user
+        self.link_content = link_content
+
+    @discord.ui.button(label="Yes", style=discord.ButtonStyle.green)
+    async def yes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            # Post in the thread
+            await self.thread.send(f"{self.user.mention} Here is the link you requested:\n{self.link_content}")
+
+            # Clear the message
+            try:
+                await interaction.response.defer()
+                if interaction.message:
+                    await interaction.message.delete()
+                else:
+                    await interaction.delete_original_response()
+            except Exception as e:
+                # Fallback if delete fails
+                try:
+                    await interaction.followup.edit_message(message_id=interaction.message.id, content=f"Posted in {self.thread.mention}.", view=None)
+                except:
+                    pass
+
+        except Exception as e:
+            try:
+                 await interaction.followup.send(f"Failed to post in thread: {e}", ephemeral=True)
+            except:
+                pass
+
+    @discord.ui.button(label="No", style=discord.ButtonStyle.red)
+    async def no_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.defer()
+            if interaction.message:
+                await interaction.message.delete()
+            else:
+                await interaction.delete_original_response()
+        except Exception:
+            try:
+                await interaction.followup.edit_message(message_id=interaction.message.id, content="Request cancelled.", view=None)
+            except:
+                pass
+
 class SearchResultSelect(Select):
     def __init__(self, results, original_interaction_user):
         # Limit to 25 options (Discord limit)
@@ -48,6 +95,7 @@ class SearchResultSelect(Select):
 
     async def callback(self, interaction: discord.Interaction):
         try:
+            await interaction.response.defer(ephemeral=True)
             selected_index = int(self.values[0])
             selected_result = self.results[selected_index]
             
@@ -73,7 +121,34 @@ class SearchResultSelect(Select):
             if not destination_channel:
                  destination_channel = interaction.channel
 
-            # Create Thread Logic
+            # --- SCAN FOR EXISTING THREADS ---
+            existing_thread = None
+
+            # 1. Check active threads
+            if hasattr(destination_channel, 'threads'):
+                for t in destination_channel.threads:
+                    if t.name == selected_result['title']:
+                        existing_thread = t
+                        break
+
+            # 2. Check archived threads (if not found in active)
+            if not existing_thread and hasattr(destination_channel, 'archived_threads'):
+                async for t in destination_channel.archived_threads(limit=None):
+                    if t.name == selected_result['title']:
+                        existing_thread = t
+                        break
+
+            if existing_thread:
+                # Ask user for confirmation
+                view = ThreadExistsView(existing_thread, self.original_user, selected_result['link'])
+                await interaction.followup.edit_message(
+                    message_id=interaction.message.id,
+                    content=f"A thread for '{selected_result['title']}' already exists: {existing_thread.mention}.\nIs this the game you are looking for?",
+                    view=view
+                )
+                return
+
+            # --- CREATE NEW THREAD ---
             print(f"Creating thread for '{selected_result['title']}' in {destination_channel.name} ({destination_channel.type})...")
             
             thread = None
@@ -98,7 +173,7 @@ class SearchResultSelect(Select):
                 await thread.send(content=message_content)
                 
             else:
-                 await interaction.response.send_message(f"Cannot create threads in channel type: {destination_channel.type}", ephemeral=True)
+                 await interaction.followup.send(f"Cannot create threads in channel type: {destination_channel.type}", ephemeral=True)
                  return
 
             # Cleanup: Delete the dropdown message to keep the channel clean
@@ -108,18 +183,18 @@ class SearchResultSelect(Select):
                     await interaction.message.delete()
                 else:
                     # If it's ephemeral or otherwise special, edit it away
-                    await interaction.response.edit_message(content="Request fulfilled.", view=None)
+                    await interaction.followup.edit_message(message_id=interaction.message.id, content="Request fulfilled.", view=None)
             except Exception as e:
                 # Fallback if delete fails (e.g. ephemeral permissions or state)
                 try:
-                    await interaction.response.edit_message(content="Request fulfilled.", view=None)
+                    await interaction.followup.edit_message(message_id=interaction.message.id, content="Request fulfilled.", view=None)
                 except:
                     pass
             
         except Exception as e:
             print(f"Error in callback: {e}")
             try:
-                await interaction.response.send_message(f"Failed to create thread: {e}", ephemeral=True)
+                await interaction.followup.send(f"Failed to create thread: {e}", ephemeral=True)
             except:
                 pass
 
@@ -161,7 +236,25 @@ async def search(ctx: commands.Context, *, query: str):
         all_results = online_fix_results + cs_rin_results
         print(f"Total results found: {len(all_results)}")
         
-        if not all_results:
+        # Filter Logic
+        strict_results = []
+        clean_query = query.strip().lower()
+
+        for res in all_results:
+            if clean_query in res['title'].lower():
+                strict_results.append(res)
+
+        final_results = []
+        msg_content = ""
+
+        if strict_results:
+            final_results = strict_results
+            msg_content = f"Found {len(final_results)} results for '{query}':"
+        elif all_results:
+            final_results = all_results
+            msg_content = f"Hey here are similar titles found with your search '{query}':"
+        else:
+             # No results at all
             msg = f"No results found for '{query}'."
             if ctx.interaction:
                 await ctx.send(msg, ephemeral=True)
@@ -171,15 +264,14 @@ async def search(ctx: commands.Context, *, query: str):
                 await asyncio.sleep(5)
                 await sent_msg.delete()
             return
-            
+
         # Pass ctx.author so we know who to tag in the thread
-        view = SearchView(all_results, ctx.author)
-        msg = f"Found {len(all_results)} results for '{query}':"
+        view = SearchView(final_results, ctx.author)
         
         if ctx.interaction:
-            await ctx.send(msg, view=view, ephemeral=True)
+            await ctx.send(msg_content, view=view, ephemeral=True)
         else:
-            await ctx.send(msg, view=view)
+            await ctx.send(msg_content, view=view)
             
         print("Response sent to user.")
         
