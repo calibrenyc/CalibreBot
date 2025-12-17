@@ -1,59 +1,66 @@
-# MaybeCalibre Bot
+# CALIBRE SEARCH BOT v2.0
 
-A feature-rich Discord bot designed to search for games on **Online-Fix.me** and **FitGirl Repacks**, manage server configurations, and provide moderation tools.
+A Discord bot for searching game repacks (FitGirl, Online-Fix), managing server configurations, and basic moderation.
 
 ## Features
 
-### Game Search & Management
-- **/search <query>**: Searches **Online-Fix.me** and **FitGirl Repacks** for games.
-- **Smart Thread Scanning**: Before creating a new thread, the bot scans specifically for existing threads (active or archived) matching the exact game title to prevent duplicates.
-- **Interactive Results**: Presents a dropdown menu. Includes a "None of the options above" choice to refine the search.
-- **Thread Creation**: Automatically creates a forum post with the game title and links inside the configured Forum Channel.
-
-### Configuration System
-- **Per-Server Config**: settings are stored per guild.
-- **/setup**: An interactive wizard to initialize the bot on a new server.
-    - Sets Owner and Moderator roles.
-    - Automatically creates 'game-requests', 'Game Threads', and private 'bot-logs' channels.
-- **/config**: Granular commands to manage settings manually (`allow_channel`, `set_forum`, `set_logs`, `add_mod_role`, etc.).
-
-### Moderation Suite
-- **Commands**: `/kick`, `/ban`, `/mute`, `/unmute`.
-- **Muted Role**: Automated creation and management of a "Muted" role that denies speaking/typing permissions across all channels.
-- **Audit Logging**: All moderation and configuration actions are logged to the configured log channel.
-
-### Fun Commands
-- **/random_move <user> [rounds]**: Randomly moves a user between voice channels for a specified number of rounds (1-10) and returns them to their original channel.
+- **Game Search:** Search FitGirl Repacks and Online-Fix for games.
+- **Thread Scanning:** Automatically checks for existing threads to prevent duplicates.
+- **Configuration System:** Interactive setup and granular configuration for roles and channels.
+- **Moderation:** Kick, Ban, Mute, Unmute.
+- **Fun:** Random Move command.
 
 ## Setup
 
-1.  **Install Python**: Ensure you have Python 3.8+ installed.
-2.  **Install Dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-3.  **Configure Environment**:
-    - Rename `.env.example` to `.env`.
-    - Open `.env` and paste your Discord Bot Token:
-      ```
-      DISCORD_TOKEN=your_token_here
-      ```
-    - Note: Channel IDs are no longer required in `.env`; use `/setup` inside Discord.
+1. **Install Requirements:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## How to Run
+2. **Environment Variables:**
+   Create a `.env` file:
+   ```env
+   DISCORD_TOKEN=your_token_here
+   ```
 
-### Windows
-Double-click `start.bat`.
+3. **Run the Bot:**
+   ```bash
+   python bot.py
+   ```
 
-### Linux / macOS
-Run the following in your terminal:
-```bash
-./start.sh
-```
+4. **Initial Configuration:**
+   Run the interactive setup wizard in your server (requires Administrator):
+   ```
+   /setup
+   ```
 
-## Requirements
-- `discord.py`
-- `cloudscraper`
-- `beautifulsoup4`
-- `python-dotenv`
-- `requests`
+## Commands
+
+### Game Search
+- `/search <query>`: Search for a game. If a thread exists, it will link you to it.
+
+### Configuration (Admin/Mod)
+- `/setup`: Run the interactive setup wizard.
+- `/config allow <channel>`: Allow searching in a text channel.
+- `/config deny <channel>`: Disallow searching in a text channel.
+- `/config forum <channel>`: Set the forum channel for game threads.
+- `/config logs <channel>`: Set the log channel.
+- `/config add_mod <role>`: Add a moderator role.
+- `/config remove_mod <role>`: Remove a moderator role.
+- `/config muted_role <role>`: Set the Muted role.
+- `/config create_mute`: Create a Muted role with channel overwrites.
+- `/config list`: List current configuration.
+
+### Moderation
+- `/kick <user>`
+- `/ban <user>`
+- `/mute <user>`
+- `/unmute <user>`
+- `/clear <amount>`: Clear messages.
+
+### Fun
+- `/random_move <user> <rounds>`: Move a user between voice channels.
+
+### Troubleshooting
+- `!fix_duplicates`: Run this text command if you see duplicate slash commands (e.g., two `/ban` commands). It clears guild-specific commands.
+- `!sync`: Force sync commands to the current guild.
