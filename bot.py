@@ -15,18 +15,20 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
+BOT_VERSION = "2.0.2"
+
 # Setup Bot
 class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
-        # Prefix '!' allows !search to work alongside /search
-        super().__init__(command_prefix="!", intents=intents)
+        # Prefix '!' OR mentioning the bot
+        super().__init__(command_prefix=commands.when_mentioned_or("!"), intents=intents)
 
     async def setup_hook(self):
         # Sync slash commands globally
         await self.tree.sync()
-        print("Commands synced.")
+        print(f"Commands synced. Bot Version: {BOT_VERSION}")
 
 bot = MyBot()
 
@@ -368,7 +370,7 @@ async def perform_search(interaction_or_ctx, query, user):
 
         if not allowed_channels:
              # Check if we should warn
-             if is_admin_or_mod(interaction_or_ctx if not is_ctx else interaction_or_ctx.message):
+             if is_admin_or_mod(interaction_or_ctx):
                  # Admin running in unconfigured server -> Allow? Or Warn?
                  # Better to block and tell them to setup.
                  pass
@@ -798,6 +800,46 @@ class ConfigGroup(commands.GroupCog, name="config"):
             await ctx.send(f"Synced {len(synced)} commands to this guild.")
         except Exception as e:
             await ctx.send(f"Failed to sync: {e}")
+
+@bot.command(name="update", help="Pull latest code from GitHub and restart (Admin/Owner only)")
+async def update_bot(ctx):
+    # Check for admin
+    if not ctx.author.guild_permissions.administrator:
+        return await ctx.send("You need Administrator permissions.")
+
+    await ctx.send("Checking for updates...")
+    try:
+        # Run git pull
+        import subprocess
+        import sys
+
+        process = await asyncio.create_subprocess_shell(
+            "git pull origin main",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+
+        output = stdout.decode().strip()
+        error = stderr.decode().strip()
+
+        if process.returncode != 0:
+            await ctx.send(f"Update failed:\n```\n{error}\n```")
+            return
+
+        if "Already up to date" in output:
+            await ctx.send("Bot is already up to date.")
+            return
+
+        await ctx.send(f"Update successful:\n```\n{output}\n```\nRestarting bot to apply changes...")
+        await log_audit(ctx.guild, f"{ctx.author.mention} initiated bot update via git pull. Restarting...", discord.Color.orange())
+
+        # Restart process
+        # This replaces the current process with a new one
+        os.execv(sys.executable, ['python'] + sys.argv)
+
+    except Exception as e:
+        await ctx.send(f"An error occurred during update: {e}")
 
 @bot.command(name="fix_duplicates", help="Fix duplicate commands by clearing guild commands (Admin/Owner only)")
 async def fix_duplicates(ctx):
