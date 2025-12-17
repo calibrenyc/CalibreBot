@@ -1,10 +1,13 @@
 import cloudscraper
 from bs4 import BeautifulSoup
 import re
+import requests
+import os
 
 # --- Configuration ---
 ONLINE_FIX_URL = "https://online-fix.me/index.php?do=search"
-RUTOR_URL = "https://rutor.org.in/index.php?do=search"
+RUTRACKER_LOGIN_URL = "https://rutracker.org/forum/login.php"
+RUTRACKER_SEARCH_URL = "https://rutracker.org/forum/tracker.php"
 
 BLACKLIST_TITLES = {
     "Gameranger",
@@ -98,65 +101,117 @@ def search_online_fix(query):
     print(f"[Scraper] Online-Fix found {len(results)} results.")
     return results
 
-def search_rutor(query):
+# Global session for reuse (to persist login cookies)
+_rutracker_session = None
+
+def get_rutracker_session():
+    global _rutracker_session
+    if _rutracker_session:
+        return _rutracker_session
+
+    username = os.getenv("RUTRACKER_USER")
+    password = os.getenv("RUTRACKER_PASSWORD")
+
+    if not username or not password:
+        print("[Scraper] RuTracker credentials not found.")
+        return None
+
+    print("[Scraper] Logging into RuTracker...")
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    })
+
+    try:
+        login_data = {
+            'login_username': username,
+            'login_password': password,
+            'login': 'Вход'
+        }
+        resp = session.post(RUTRACKER_LOGIN_URL, data=login_data)
+        if resp.status_code == 200 and 'bb_data' in session.cookies:
+            print("[Scraper] RuTracker login successful.")
+            _rutracker_session = session
+            return session
+        else:
+             print("[Scraper] RuTracker login failed (Check credentials or captcha).")
+             return None
+    except Exception as e:
+        print(f"[Scraper] RuTracker login error: {e}")
+        return None
+
+def search_rutracker(query):
     """
-    Searches rutor.org.in for the query using a POST request.
+    Searches rutracker.org for the query using a POST request with authentication.
     """
     results = []
-    print(f"[Scraper] Searching Rutor for '{query}'...")
+    print(f"[Scraper] Searching RuTracker for '{query}'...")
+
+    session = get_rutracker_session()
+    if not session:
+        return results
     
     try:
-        scraper = cloudscraper.create_scraper()
-
         data = {
-            "do": "search",
-            "subaction": "search",
-            "story": query
+            'nm': query
         }
+
+        # The search is a POST to tracker.php
+        response = session.post(RUTRACKER_SEARCH_URL, data=data)
         
-        response = scraper.post(RUTOR_URL, data=data)
         if response.status_code != 200:
-            print(f"[Scraper] Rutor search failed with status: {response.status_code}")
+            print(f"[Scraper] RuTracker search failed with status: {response.status_code}")
             return results
+
+        # RuTracker encoding is CP1251
+        response.encoding = 'cp1251'
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Select titles
-        titles = soup.select("div.dtitle > a")
+        # Results are in #tor-tbl > tbody > tr
+        rows = soup.select("#tor-tbl tr.tCenter.hl-tr")
 
-        for t in titles:
+        for row in rows:
             try:
-                raw_title = t.get_text(strip=True)
-                href = t['href']
+                # Title link is in td.t-title-col > div.t-title > a
+                title_tag = row.select_one("div.t-title a")
+                if not title_tag:
+                    continue
                 
-                title = clean_title(raw_title)
+                raw_title = title_tag.get_text(strip=True)
+                # Link is usually 'viewtopic.php?t=...'
+                # Need to prepend domain
+                href_suffix = title_tag['href']
+                link = f"https://rutracker.org/forum/{href_suffix}"
 
+                title = clean_title(raw_title)
                 if not title:
                     continue
 
                 results.append({
                     "title": title,
-                    "link": href,
-                    "source": "rutor.org.in"
+                    "link": link,
+                    "source": "rutracker.org"
                 })
             except Exception as e:
-                print(f"[Scraper] Error parsing rutor title: {e}")
+                print(f"[Scraper] Error parsing rutracker row: {e}")
                 continue
 
     except Exception as e:
-        print(f"[Scraper] Error searching rutor: {e}")
+        print(f"[Scraper] Error searching rutracker: {e}")
         
-    print(f"[Scraper] Rutor found {len(results)} results.")
+    print(f"[Scraper] RuTracker found {len(results)} results.")
     return results
 
 if __name__ == "__main__":
     # Test execution
     print("Testing Scrapers...")
-    of_res = search_online_fix("cyberpunk")
-    for r in of_res[:3]:
-        print(r)
+    # NOTE: Ensure RUTRACKER_USER and RUTRACKER_PASSWORD are set in env for this to work
+
+    # of_res = search_online_fix("cyberpunk")
+    # for r in of_res[:3]:
+    #    print(r)
         
-    # Test Rutor
-    rutor_res = search_rutor("cyberpunk")
-    for r in rutor_res[:3]:
+    rt_res = search_rutracker("cyberpunk")
+    for r in rt_res[:3]:
         print(r)
