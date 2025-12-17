@@ -29,7 +29,7 @@ A Discord bot for searching game repacks (FitGirl, Online-Fix), managing server 
    ```
 
 4. **Initial Configuration:**
-   Run the interactive setup wizard in your server (requires Administrator):
+   Run the interactive setup wizard in your server (requires Server Owner):
    ```
    /setup
    ```
@@ -40,7 +40,7 @@ A Discord bot for searching game repacks (FitGirl, Online-Fix), managing server 
 - `/search <query>`: Search for a game. If a thread exists, it will link you to it.
 
 ### Configuration (Admin/Mod)
-- `/setup`: Run the interactive setup wizard.
+- `/setup`: Run the interactive setup wizard (Server Owner Only).
 - `/config allow <channel>`: Allow searching in a text channel.
 - `/config deny <channel>`: Disallow searching in a text channel.
 - `/config forum <channel>`: Set the forum channel for game threads.
