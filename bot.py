@@ -454,6 +454,14 @@ async def perform_search(interaction_or_ctx, query, user):
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
+    await bot.change_presence(activity=discord.Game(name="in Calibre's Brain"))
+
+    # Send startup message to all configured log channels
+    for guild in bot.guilds:
+        try:
+            await log_audit(guild, "**Bot is alive!** Startup complete.", discord.Color.green())
+        except Exception:
+            pass
 
 # --- SETUP WIZARD ---
 class RoleSelect(Select):
