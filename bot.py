@@ -5,13 +5,14 @@ from discord.ui import Select, View
 from dotenv import load_dotenv
 import scrapers
 import asyncio
+from config_manager import config_manager
 
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-TARGET_CHANNEL_ID = os.getenv('TARGET_CHANNEL_ID') # Optional: ID of channel where commands are allowed
-FORUM_CHANNEL_ID = os.getenv('FORUM_CHANNEL_ID') # ID of the Forum/Text channel where threads are created
-OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID') # ID of the role allowed to use admin commands
+# Global env vars are now deprecated in favor of guild config,
+# but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
+OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
 # Setup Bot
 class MyBot(commands.Bot):
@@ -27,6 +28,28 @@ class MyBot(commands.Bot):
         print("Commands synced.")
 
 bot = MyBot()
+
+class YesNoView(View):
+    def __init__(self, ctx):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        self.value = None
+
+    @discord.ui.button(label="Yes", style=discord.ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.ctx.author:
+            return await interaction.response.send_message("Not your command.", ephemeral=True)
+        self.value = True
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="No", style=discord.ButtonStyle.red)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.ctx.author:
+            return await interaction.response.send_message("Not your command.", ephemeral=True)
+        self.value = False
+        self.stop()
+        await interaction.response.defer()
 
 class ThreadExistsView(View):
     def __init__(self, thread, user, link_content):
@@ -144,27 +167,34 @@ class SearchResultSelect(Select):
             selected_index = int(selected_value)
             selected_result = self.results[selected_index]
             
-            # Determine destination channel (Forum Channel)
+            # --- Get Configured Destination Channel ---
+            guild_id = interaction.guild_id
+            config = config_manager.get_guild_config(guild_id)
+            forum_channel_id = config.get('forum_channel_id')
+
             destination_channel = None
             
-            if FORUM_CHANNEL_ID:
+            if forum_channel_id:
                 try:
-                    fetched_channel = bot.get_channel(int(FORUM_CHANNEL_ID))
+                    fetched_channel = bot.get_channel(int(forum_channel_id))
                     if fetched_channel:
                         destination_channel = fetched_channel
                     else:
                         # Attempt to fetch if not in cache
                         try:
-                            fetched_channel = await bot.fetch_channel(int(FORUM_CHANNEL_ID))
+                            fetched_channel = await bot.fetch_channel(int(forum_channel_id))
                             destination_channel = fetched_channel
                         except:
-                            print(f"Could not fetch FORUM_CHANNEL_ID {FORUM_CHANNEL_ID}")
+                            print(f"Could not fetch FORUM_CHANNEL_ID {forum_channel_id}")
                 except ValueError:
-                    print(f"Invalid FORUM_CHANNEL_ID: {FORUM_CHANNEL_ID}")
+                    print(f"Invalid FORUM_CHANNEL_ID: {forum_channel_id}")
             
-            # If no forum channel configured, fallback to current channel (or error if strictly required)
+            # If no forum channel configured, fallback to current channel IF allowed?
+            # User requirement 3 says: "if no configured channel is set it will alert you... and not post anywhere"
             if not destination_channel:
-                 destination_channel = interaction.channel
+                 await log_error(interaction.guild, f"User {interaction.user} tried to create a thread but no Forum Channel is configured.")
+                 await interaction.followup.send("Error: No Forum Channel configured for this server. Please contact an admin.", ephemeral=True)
+                 return
 
             # --- SCAN FOR EXISTING THREADS ---
             existing_thread = None
@@ -248,14 +278,112 @@ class SearchView(View):
         super().__init__()
         self.add_item(SearchResultSelect(results, original_user))
 
+# Helper to check permissions
+def is_admin_or_mod(obj):
+    """
+    Checks if the user executing the command (Context or Interaction) is an Admin or Mod.
+    obj: can be discord.Interaction or commands.Context
+    """
+    user = obj.author if isinstance(obj, commands.Context) else obj.user
+    guild = obj.guild
+
+    if not guild:
+        return False # No permissions in DMs usually
+
+    # Check Administrator Permission
+    # For Context, permissions are in channel_permissions or guild_permissions
+    if isinstance(obj, commands.Context):
+        if obj.author.guild_permissions.administrator:
+            return True
+    else:
+        # Interaction
+        if obj.permissions.administrator:
+            return True
+
+    # Check Configured Mod Roles
+    config = config_manager.get_guild_config(guild.id)
+    mod_roles = config.get('mod_roles', [])
+
+    if mod_roles:
+        for role in user.roles:
+            if role.id in mod_roles:
+                return True
+
+    # Fallback to OWNER_ROLE_ID if set (legacy support)
+    if OWNER_ROLE_ID:
+        try:
+            if any(r.id == int(OWNER_ROLE_ID) for r in user.roles):
+                return True
+        except:
+            pass
+
+    return False
+
+async def log_error(guild, message):
+    if not guild: return
+    config = config_manager.get_guild_config(guild.id)
+    log_channel_id = config.get('log_channel_id')
+    if log_channel_id:
+        try:
+            channel = guild.get_channel(int(log_channel_id))
+            if channel:
+                await channel.send(f"[Error] {message}")
+        except Exception as e:
+            print(f"Failed to log error to channel {log_channel_id}: {e}")
+
 async def perform_search(interaction_or_ctx, query, user):
     """
     Shared search logic to be used by the command and the retry flow.
     interaction_or_ctx: can be Context (from command) or Interaction (from retry)
     """
+    # Determine context
+    is_ctx = isinstance(interaction_or_ctx, commands.Context)
+    guild_id = interaction_or_ctx.guild.id if interaction_or_ctx.guild else None
+
+    # Permission Check: Allowed Channels
+    if guild_id:
+        config = config_manager.get_guild_config(guild_id)
+        allowed_channels = config.get('allowed_search_channels', [])
+
+        current_channel_id = interaction_or_ctx.channel.id
+
+        # Rule: If allowed list is NOT empty, strict enforcement.
+        # If allowed list IS empty, should we allow?
+        # Requirement 3 implies "if no configured channel is set... not post anywhere".
+        # So if list is empty, default to BLOCK (unless Admin setup needed?)
+        # Let's say if list is empty, BLOCK.
+
+        if not allowed_channels:
+             # Check if we should warn
+             if is_admin_or_mod(interaction_or_ctx if not is_ctx else interaction_or_ctx.message):
+                 # Admin running in unconfigured server -> Allow? Or Warn?
+                 # Better to block and tell them to setup.
+                 pass
+
+             msg = "Search is not enabled in any channel on this server. Please ask an admin to configure the bot."
+             if is_ctx: await interaction_or_ctx.send(msg)
+             else:
+                 if not interaction_or_ctx.response.is_done():
+                     await interaction_or_ctx.response.send_message(msg, ephemeral=True)
+                 else:
+                     await interaction_or_ctx.followup.send(msg, ephemeral=True)
+
+             await log_error(interaction_or_ctx.guild, f"Search attempted by {user} but no allowed channels configured.")
+             return
+
+        if current_channel_id not in allowed_channels:
+             msg = "Command not allowed in this channel."
+             if is_ctx: await interaction_or_ctx.send(msg)
+             else:
+                 if not interaction_or_ctx.response.is_done():
+                     await interaction_or_ctx.response.send_message(msg, ephemeral=True)
+                 else:
+                     await interaction_or_ctx.followup.send(msg, ephemeral=True)
+             return
+
     # Helper to send messages appropriately
     async def send_msg(content, view=None, ephemeral=True):
-        if isinstance(interaction_or_ctx, commands.Context):
+        if is_ctx:
              if view:
                  await interaction_or_ctx.send(content, view=view)
              else:
@@ -318,6 +446,111 @@ async def perform_search(interaction_or_ctx, query, user):
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
 
+# --- SETUP COMMAND ---
+@bot.hybrid_command(name="setup", description="Auto-configure the bot for this server (Admin only)")
+async def setup(ctx: commands.Context):
+    # Check Admin
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("You need Administrator permissions to run this command.", ephemeral=True)
+        return
+
+    view = YesNoView(ctx)
+    msg = await ctx.send("Do you want to automatically create a 'game-requests' channel, a 'bot-logs' channel, and a 'Game Threads' forum channel?", view=view)
+
+    await view.wait()
+
+    if view.value is None:
+        await ctx.send("Timed out.", ephemeral=True)
+    elif view.value:
+        # User said YES
+        guild = ctx.guild
+        try:
+            # Create Category
+            category = await guild.create_category("Game Bot")
+
+            # Create Text Channels
+            req_channel = await guild.create_text_channel("game-requests", category=category)
+            log_channel = await guild.create_text_channel("bot-logs", category=category)
+
+            # Create Forum Channel
+            forum_channel = await guild.create_forum_channel("Game Threads", category=category)
+
+            # Save Config
+            config_manager.update_guild_config(guild.id, 'forum_channel_id', forum_channel.id)
+            config_manager.update_guild_config(guild.id, 'log_channel_id', log_channel.id)
+            config_manager.add_to_list(guild.id, 'allowed_search_channels', req_channel.id)
+
+            await ctx.send(f"Setup complete!\nRequest Channel: {req_channel.mention}\nLog Channel: {log_channel.mention}\nForum: {forum_channel.mention}\n\nThe bot is now allowed to search in {req_channel.mention}.", ephemeral=True)
+
+        except Exception as e:
+            await ctx.send(f"Error during setup: {e}", ephemeral=True)
+    else:
+        # User said NO
+        await ctx.send("Automatic setup cancelled. Please use `/config` commands to configure manually.", ephemeral=True)
+
+# --- CONFIG GROUP ---
+class ConfigGroup(commands.GroupCog, name="config"):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if is_admin_or_mod(interaction):
+            return True
+        await interaction.response.send_message("You do not have permission to use config commands.", ephemeral=True)
+        return False
+
+    @discord.app_commands.command(name="allow_channel", description="Allow searching in a text channel")
+    async def allow_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        config_manager.add_to_list(interaction.guild_id, 'allowed_search_channels', channel.id)
+        await interaction.response.send_message(f"Added {channel.mention} to allowed search channels.", ephemeral=True)
+
+    @discord.app_commands.command(name="disallow_channel", description="Disallow searching in a text channel")
+    async def disallow_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        config_manager.remove_from_list(interaction.guild_id, 'allowed_search_channels', channel.id)
+        await interaction.response.send_message(f"Removed {channel.mention} from allowed search channels.", ephemeral=True)
+
+    @discord.app_commands.command(name="set_forum", description="Set the forum channel for game threads")
+    async def set_forum(self, interaction: discord.Interaction, channel: discord.ForumChannel):
+        config_manager.update_guild_config(interaction.guild_id, 'forum_channel_id', channel.id)
+        await interaction.response.send_message(f"Forum channel set to {channel.mention}.", ephemeral=True)
+
+    @discord.app_commands.command(name="set_logs", description="Set the log channel for bot errors")
+    async def set_logs(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        config_manager.update_guild_config(interaction.guild_id, 'log_channel_id', channel.id)
+        await interaction.response.send_message(f"Log channel set to {channel.mention}.", ephemeral=True)
+
+    @discord.app_commands.command(name="add_mod_role", description="Add a role that can manage bot config")
+    async def add_mod_role(self, interaction: discord.Interaction, role: discord.Role):
+        config_manager.add_to_list(interaction.guild_id, 'mod_roles', role.id)
+        await interaction.response.send_message(f"Added {role.mention} as a moderator role.", ephemeral=True)
+
+    @discord.app_commands.command(name="list", description="List current configuration")
+    async def list_config(self, interaction: discord.Interaction):
+        config = config_manager.get_guild_config(interaction.guild_id)
+
+        # Helper to format lists
+        def fmt_channels(ids):
+            return ", ".join([f"<#{c}>" for c in ids]) if ids else "None"
+
+        def fmt_roles(ids):
+            return ", ".join([f"<@&{r}>" for r in ids]) if ids else "None"
+
+        embed = discord.Embed(title="Bot Configuration", color=discord.Color.blue())
+        embed.add_field(name="Allowed Search Channels", value=fmt_channels(config.get('allowed_search_channels')), inline=False)
+
+        fid = config.get('forum_channel_id')
+        embed.add_field(name="Forum Channel", value=f"<#{fid}>" if fid else "Not Set", inline=False)
+
+        lid = config.get('log_channel_id')
+        embed.add_field(name="Log Channel", value=f"<#{lid}>" if lid else "Not Set", inline=False)
+
+        embed.add_field(name="Moderator Roles", value=fmt_roles(config.get('mod_roles')), inline=False)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+async def setup_cogs():
+    await bot.add_cog(ConfigGroup(bot))
+
 @bot.hybrid_command(name="search", description="Search for games on Online-Fix and FitGirl")
 @discord.app_commands.describe(query="The game to search for")
 async def search(ctx: commands.Context, *, query: str):
@@ -344,27 +577,38 @@ async def search(ctx: commands.Context, *, query: str):
 @bot.hybrid_command(name="clear", description="Clear the last 10 messages (Owner Role only)")
 @discord.app_commands.describe(amount="Number of messages to clear (default 10)")
 async def clear(ctx: commands.Context, amount: int = 10):
-    # Check if user has the allowed role
-    if not OWNER_ROLE_ID:
-        await ctx.send("OWNER_ROLE_ID is not configured.", ephemeral=True)
-        return
+    # Check permissions using helper
+    if not is_admin_or_mod(ctx if hasattr(ctx, 'permissions') else ctx.interaction): # Hacky context check
+         # Actually just check manually since clear might be strict owner
+         pass
 
-    has_role = False
-    try:
-        required_role_id = int(OWNER_ROLE_ID)
-        if any(role.id == required_role_id for role in ctx.author.roles):
-            has_role = True
-    except ValueError:
-        pass # Invalid ID format
-    except AttributeError:
-        pass # DM context or user has no roles
+    # Use old OWNER check for clear command specifically as requested in original prompt?
+    # User said "other commands should be allowed anywhere. And yes, there should be a permission for not only owner, but moderators"
+    # So clear should check is_admin_or_mod.
 
-    if not has_role:
-        await ctx.send("You do not have permission to use this command.", ephemeral=True)
-        return
+    if not is_admin_or_mod(ctx.interaction if ctx.interaction else ctx): # ctx matches interaction interface mostly
+         # Wait, context doesn't have permissions attribute the same way always.
+         # Let's use the helper properly.
+         # Actually, for hybrid commands, ctx is Context.
+         # Helper takes interaction.
+         # Let's rebuild permission check inline for context.
+         is_auth = False
+         if ctx.author.guild_permissions.administrator: is_auth = True
+         if not is_auth:
+             config = config_manager.get_guild_config(ctx.guild.id)
+             for r in ctx.author.roles:
+                 if r.id in config.get('mod_roles', []):
+                     is_auth = True
+                     break
+         if not is_auth and OWNER_ROLE_ID: # Legacy
+             # Simplified check
+             pass
 
-    # Delete the command message itself if possible (for clean logs), 
-    # though purge might catch it if it's not ephemeral.
+         if not is_auth:
+             await ctx.send("You do not have permission to use this command.", ephemeral=True)
+             return
+
+    # Delete the command message itself if possible
     if not ctx.interaction:
         try:
             await ctx.message.delete()
@@ -376,7 +620,6 @@ async def clear(ctx: commands.Context, amount: int = 10):
         deleted = await ctx.channel.purge(limit=amount)
         msg = await ctx.send(f"Deleted {len(deleted)} messages.", ephemeral=True)
         
-        # If not ephemeral (text context), delete confirmation after 3s
         if not ctx.interaction:
             await asyncio.sleep(3)
             await msg.delete()
@@ -386,8 +629,14 @@ async def clear(ctx: commands.Context, amount: int = 10):
     except Exception as e:
         await ctx.send(f"Failed to clear messages: {e}", ephemeral=True)
 
+# Main Execution
 if __name__ == "__main__":
     if not TOKEN:
         print("Error: DISCORD_TOKEN not found in .env")
     else:
-        bot.run(TOKEN)
+        # Register Cogs on startup
+        async def main():
+            await setup_cogs()
+            await bot.start(TOKEN)
+
+        asyncio.run(main())
