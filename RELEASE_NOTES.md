@@ -54,3 +54,20 @@ We are excited to announce the release of **Calibre Search Bot v2.0**! This majo
     ```
 5.  **Fix Duplicates (if updating):**
     Run `!fix_duplicates` in your server to clean up old command registrations.
+
+# Calibre Search Bot - Version 2.0.2
+
+This minor update introduces quality-of-life improvements for bot maintenance and command usage.
+
+## 🚀 New Features
+
+### 🔄 Self-Update Command
+*   **Easy Updates:** Admins can now run `@Bot update` (or `!update`) to automatically pull the latest code from GitHub and restart the bot. No more manual terminal work!
+
+### 📣 Mention-Based Commands
+*   **No More Prefix Conflicts:** You can now trigger text commands by mentioning the bot.
+    *   Example: `@CalibreBot sync` works the same as `!sync`.
+    *   The `!` prefix is still supported as a fallback.
+
+## 🔧 Improvements
+*   **Version Tracking:** The bot now logs its version number on startup.

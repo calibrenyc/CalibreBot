@@ -61,6 +61,8 @@ A Discord bot for searching game repacks (FitGirl, Online-Fix), managing server 
 ### Fun
 - `/random_move <user> <rounds>`: Move a user between voice channels.
 
-### Troubleshooting
-- `!fix_duplicates`: Run this text command if you see duplicate slash commands (e.g., two `/ban` commands). It clears guild-specific commands.
-- `!sync`: Force sync commands to the current guild.
+### Troubleshooting & Maintenance
+- `@Bot update`: Pulls the latest code from GitHub and restarts the bot (Admin only).
+- `@Bot fix_duplicates`: Run this if you see duplicate slash commands.
+- `@Bot sync`: Force sync commands to the current guild.
+*Note: You can use these commands by mentioning the bot (e.g., `@CalibreBot update`) or using the `!` prefix.*
