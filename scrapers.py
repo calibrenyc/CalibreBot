@@ -14,10 +14,22 @@ except ImportError:
 # --- Configuration ---
 ONLINE_FIX_URL = "https://online-fix.me/index.php?do=search"
 
+BLACKLIST_TITLES = {
+    "Gameranger",
+    "Info",
+    "Login",
+    "Register",
+    "Main Page"
+}
+
 def clean_title(title):
     """
     Cleans up the game title by removing common scraping artifacts and non-English suffixes.
+    Returns None if the title is invalid or blacklisted.
     """
+    if not title:
+        return None
+
     # Remove "по сети" (Cyrillic) and "po seti" (Latin)
     title = re.sub(r'\s+по сети', '', title, flags=re.IGNORECASE)
     title = re.sub(r'\s+po seti', '', title, flags=re.IGNORECASE)
@@ -31,6 +43,9 @@ def clean_title(title):
     # Remove excessive whitespace
     title = " ".join(title.split())
     
+    if not title or title in BLACKLIST_TITLES:
+        return None
+
     return title
 
 def search_online_fix(query):
@@ -71,6 +86,9 @@ def search_online_fix(query):
                 raw_title = title_tag.get_text(strip=True)
                 title = clean_title(raw_title)
                 
+                if not title:
+                    continue
+
                 # Link is in <a class="big-link"> or the parent <a> of h2
                 link_tag = article.select_one("a.big-link")
                 if not link_tag:
@@ -118,7 +136,7 @@ def search_cs_rin(query):
                      title = clean_title(raw_title)
                      
                      if not title:
-                         title = raw_title # Fallback if empty
+                         continue # Skip if empty or blacklisted
                          
                      results.append({
                         "title": title,
