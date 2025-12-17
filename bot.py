@@ -719,6 +719,21 @@ class ConfigGroup(commands.GroupCog, name="config"):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    @discord.app_commands.command(name="sync", description="Force sync slash commands (Admin only)")
+    async def sync_commands(self, interaction: discord.Interaction):
+        if not interaction.permissions.administrator:
+            return await interaction.response.send_message("You need Administrator permissions.", ephemeral=True)
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            # Sync guild commands
+            synced = await self.bot.tree.sync(guild=interaction.guild)
+            # Sync global (optional, but good for hybrid)
+            await self.bot.tree.sync()
+            await interaction.followup.send(f"Synced {len(synced)} commands to this guild.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"Failed to sync: {e}", ephemeral=True)
+
 # --- MODERATION COG ---
 class Moderation(commands.Cog):
     def __init__(self, bot: commands.Bot):
