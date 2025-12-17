@@ -277,9 +277,9 @@ async def perform_search(interaction_or_ctx, query, user):
         # Run scrapers
         # Note: We need 'bot' here. Since this is outside class, we use the global 'bot' instance.
         online_fix_results = await bot.loop.run_in_executor(None, scrapers.search_online_fix, query)
-        rutor_results = await bot.loop.run_in_executor(None, scrapers.search_rutor, query)
+        rutracker_results = await bot.loop.run_in_executor(None, scrapers.search_rutracker, query)
 
-        all_results = online_fix_results + rutor_results
+        all_results = online_fix_results + rutracker_results
         print(f"Total results found: {len(all_results)}")
 
         # Filter Logic
@@ -318,7 +318,7 @@ async def perform_search(interaction_or_ctx, query, user):
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
 
-@bot.hybrid_command(name="search", description="Search for games on Online-Fix and Rutor")
+@bot.hybrid_command(name="search", description="Search for games on Online-Fix and RuTracker")
 @discord.app_commands.describe(query="The game to search for")
 async def search(ctx: commands.Context, *, query: str):
     print(f"Received search command for '{query}' from {ctx.author}")
