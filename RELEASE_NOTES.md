@@ -17,7 +17,7 @@ We are excited to announce the release of **Calibre Search Bot v2.0**! This majo
 
 ### ⚙️ Robust Configuration System
 *   **Per-Guild Config:** All settings (channels, roles, logs) are now saved per-guild in `guild_configs.json`.
-*   **Interactive Wizard:** Run `/setup` for a guided, step-by-step installation (Sets Owner, Mods, and auto-creates Channels).
+*   **Interactive Wizard:** Run `/setup` for a guided, step-by-step installation (Restricted to **Server Owner only**).
 *   **Simplified Commands:** We've streamlined the command names for better usability:
     *   `/config add_mod` / `/config remove_mod`
     *   `/config allow` / `/config deny` (for channel permissions)

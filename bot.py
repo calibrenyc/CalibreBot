@@ -599,11 +599,11 @@ class SetupWizard:
         await self.ctx.send("✅ **Setup Complete!**\nYou can further configure the bot using `/config` commands.")
         await log_audit(self.guild, f"**Setup Wizard** completed by {self.ctx.author.mention}.", discord.Color.green())
 
-@bot.hybrid_command(name="setup", description="Interactive setup wizard (Admin only)")
+@bot.hybrid_command(name="setup", description="Interactive setup wizard (Server Owner only)")
 async def setup(ctx: commands.Context):
-    # Check Admin
-    if not ctx.author.guild_permissions.administrator:
-        await ctx.send("You need Administrator permissions to run this command.", ephemeral=True)
+    # Check Server Owner
+    if ctx.author.id != ctx.guild.owner_id:
+        await ctx.send("Only the **Server Owner** can run this command.", ephemeral=True)
         return
 
     await log_audit(ctx.guild, f"**Setup Wizard** started by {ctx.author.mention}.")
