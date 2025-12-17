@@ -621,45 +621,106 @@ class ConfigGroup(commands.GroupCog, name="config"):
         await interaction.response.send_message("You do not have permission to use config commands.", ephemeral=True)
         return False
 
-    @discord.app_commands.command(name="allow_channel", description="Allow searching in a text channel")
-    async def allow_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+    @discord.app_commands.command(name="allow", description="Allow searching in a text channel")
+    async def allow(self, interaction: discord.Interaction, channel: discord.TextChannel):
         config_manager.add_to_list(interaction.guild_id, 'allowed_search_channels', channel.id)
         await interaction.response.send_message(f"Added {channel.mention} to allowed search channels.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} allowed search in {channel.mention}.")
 
-    @discord.app_commands.command(name="disallow_channel", description="Disallow searching in a text channel")
-    async def disallow_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+    @discord.app_commands.command(name="deny", description="Disallow searching in a text channel")
+    async def deny(self, interaction: discord.Interaction, channel: discord.TextChannel):
         config_manager.remove_from_list(interaction.guild_id, 'allowed_search_channels', channel.id)
         await interaction.response.send_message(f"Removed {channel.mention} from allowed search channels.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} disallowed search in {channel.mention}.")
 
-    @discord.app_commands.command(name="set_forum", description="Set the forum channel for game threads")
-    async def set_forum(self, interaction: discord.Interaction, channel: discord.ForumChannel):
+    @discord.app_commands.command(name="forum", description="Set the forum channel for game threads")
+    async def forum(self, interaction: discord.Interaction, channel: discord.ForumChannel):
         config_manager.update_guild_config(interaction.guild_id, 'forum_channel_id', channel.id)
         await interaction.response.send_message(f"Forum channel set to {channel.mention}.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} set Forum Channel to {channel.mention}.")
 
-    @discord.app_commands.command(name="set_logs", description="Set the log channel for bot errors")
-    async def set_logs(self, interaction: discord.Interaction, channel: discord.TextChannel):
+    @discord.app_commands.command(name="logs", description="Set the log channel for bot errors")
+    async def logs(self, interaction: discord.Interaction, channel: discord.TextChannel):
         config_manager.update_guild_config(interaction.guild_id, 'log_channel_id', channel.id)
         await interaction.response.send_message(f"Log channel set to {channel.mention}.", ephemeral=True)
         # Log to the new channel
         await log_audit(interaction.guild, f"{interaction.user.mention} set Log Channel to {channel.mention}.")
 
-    @discord.app_commands.command(name="add_mod_role", description="Add a role that can manage bot config")
-    async def add_mod_role(self, interaction: discord.Interaction, role: discord.Role):
+    @discord.app_commands.command(name="add_mod", description="Add a role that can manage bot config")
+    async def add_mod(self, interaction: discord.Interaction, role: discord.Role):
         config_manager.add_to_list(interaction.guild_id, 'mod_roles', role.id)
         await interaction.response.send_message(f"Added {role.mention} as a moderator role.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} added Mod Role {role.mention}.")
 
-    @discord.app_commands.command(name="set_muted_role", description="Set the role to use for muting users")
-    async def set_muted_role(self, interaction: discord.Interaction, role: discord.Role):
+    @discord.app_commands.command(name="remove_mod", description="Remove a moderator role")
+    async def remove_mod(self, interaction: discord.Interaction, role: discord.Role):
+        config_manager.remove_from_list(interaction.guild_id, 'mod_roles', role.id)
+        await interaction.response.send_message(f"Removed {role.mention} from moderator roles.", ephemeral=True)
+        await log_audit(interaction.guild, f"{interaction.user.mention} removed Mod Role {role.mention}.")
+
+    @discord.app_commands.command(name="muted_role", description="Set the role to use for muting users")
+    async def muted_role(self, interaction: discord.Interaction, role: discord.Role):
         config_manager.update_guild_config(interaction.guild_id, 'muted_role_id', role.id)
         await interaction.response.send_message(f"Muted role set to {role.mention}.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} set Muted Role to {role.mention}.")
 
-    @discord.app_commands.command(name="create_muted_role", description="Create a new Muted role with permissions")
-    async def create_muted_role(self, interaction: discord.Interaction):
+    @discord.app_commands.command(name="create_mute", description="Create a new Muted role with permissions")
+    async def create_mute(self, interaction: discord.Interaction):
+        # Check if already configured
+        config = config_manager.get_guild_config(interaction.guild_id)
+        existing_id = config.get('muted_role_id')
+
+        if existing_id:
+            # Check if role actually exists
+            role = interaction.guild.get_role(existing_id)
+            if role:
+                 # Prompt user
+                 view = YesNoView(interaction) # YesNoView expects ctx in __init__?
+                 # Wait, YesNoView is defined above: __init__(self, ctx). It uses ctx.author.
+                 # We need to adapt it or create a new one for Interaction.
+                 # Let's create a quick inline view or modify YesNoView to handle interaction.user
+
+                 class RemoveConfigView(discord.ui.View):
+                     def __init__(self, original_interaction):
+                         super().__init__(timeout=60)
+                         self.original_interaction = original_interaction
+                         self.value = None
+
+                     @discord.ui.button(label="Yes, Remove Config", style=discord.ButtonStyle.red)
+                     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+                         if interaction.user != self.original_interaction.user:
+                             return await interaction.response.send_message("Not your command.", ephemeral=True)
+                         self.value = True
+                         self.stop()
+                         await interaction.response.defer()
+
+                     @discord.ui.button(label="No, Cancel", style=discord.ButtonStyle.gray)
+                     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+                         if interaction.user != self.original_interaction.user:
+                             return await interaction.response.send_message("Not your command.", ephemeral=True)
+                         self.value = False
+                         self.stop()
+                         await interaction.response.defer()
+
+                 view = RemoveConfigView(interaction)
+                 await interaction.response.send_message(
+                     f"A Muted role is already configured: {role.mention}.\nWould you like to **remove** this configuration instead?",
+                     view=view,
+                     ephemeral=True
+                 )
+                 await view.wait()
+
+                 if view.value:
+                     config_manager.update_guild_config(interaction.guild_id, 'muted_role_id', None)
+                     await interaction.edit_original_response(content=f"Configuration removed. {role.mention} is no longer the tracked Muted role.", view=None)
+                     await log_audit(interaction.guild, f"{interaction.user.mention} removed Muted Role configuration.")
+                 else:
+                     await interaction.edit_original_response(content="Action cancelled.", view=None)
+                 return
+            else:
+                 # Config exists but role is gone. Overwrite freely.
+                 pass
+
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
 
@@ -737,6 +798,28 @@ class ConfigGroup(commands.GroupCog, name="config"):
             await ctx.send(f"Synced {len(synced)} commands to this guild.")
         except Exception as e:
             await ctx.send(f"Failed to sync: {e}")
+
+@bot.command(name="fix_duplicates", help="Fix duplicate commands by clearing guild commands (Admin/Owner only)")
+async def fix_duplicates(ctx):
+    # Check for admin
+    if not ctx.author.guild_permissions.administrator:
+        return await ctx.send("You need Administrator permissions.")
+
+    await ctx.send("Attempting to fix duplicate commands (clearing guild-specific commands)...")
+    try:
+        # Clear commands for this guild
+        bot.tree.clear_commands(guild=ctx.guild)
+        await bot.tree.sync(guild=ctx.guild)
+
+        # Resync global commands just in case?
+        # Actually, if we clear guild commands, the global ones should show up
+        # (assuming they are synced globally).
+        # But if the global sync hasn't propagated, users might see nothing.
+        # Let's trust setup_hook did global sync.
+
+        await ctx.send("Guild commands cleared. Please restart your Discord client (Ctrl+R) to see changes. Only global commands should remain.")
+    except Exception as e:
+        await ctx.send(f"Error fixing duplicates: {e}")
 
 # --- MODERATION COG ---
 class Moderation(commands.Cog):
@@ -890,37 +973,52 @@ class Fun(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error during random move: {e}", ephemeral=True)
 
+class GameSearch(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @commands.hybrid_command(name="search", description="Search for games on Online-Fix and FitGirl")
+    @discord.app_commands.describe(query="The game to search for")
+    async def search(self, ctx: commands.Context, *, query: str):
+        print(f"Received search command for '{query}' from {ctx.author}")
+
+        # 1. Handle auto-deletion of request message (if prefix command)
+        if not ctx.interaction:
+            try:
+                await ctx.message.delete()
+            except discord.Forbidden:
+                print("Missing permissions to delete user message.")
+            except Exception as e:
+                print(f"Error deleting message: {e}")
+
+        # Defer response
+        if ctx.interaction:
+            await ctx.defer(ephemeral=True)
+        else:
+            await ctx.typing()
+
+        # Delegate to helper
+        await perform_search(ctx, query, ctx.author)
+
 async def setup_cogs():
     await bot.add_cog(ConfigGroup(bot))
     await bot.add_cog(Moderation(bot))
     await bot.add_cog(Fun(bot))
-
-@bot.hybrid_command(name="search", description="Search for games on Online-Fix and FitGirl")
-@discord.app_commands.describe(query="The game to search for")
-async def search(ctx: commands.Context, *, query: str):
-    print(f"Received search command for '{query}' from {ctx.author}")
-
-    # 1. Handle auto-deletion of request message (if prefix command)
-    if not ctx.interaction:
-        try:
-            await ctx.message.delete()
-        except discord.Forbidden:
-            print("Missing permissions to delete user message.")
-        except Exception as e:
-            print(f"Error deleting message: {e}")
-
-    # Defer response
-    if ctx.interaction:
-        await ctx.defer(ephemeral=True)
-    else:
-        await ctx.typing()
-
-    # Delegate to helper
-    await perform_search(ctx, query, ctx.author)
+    await bot.add_cog(GameSearch(bot))
 
 @bot.hybrid_command(name="showcommands", description="Show all available commands")
 async def show_commands(ctx: commands.Context):
     embed = discord.Embed(title="Bot Commands Help", color=discord.Color.blue())
+
+    # 0. Game Search Commands
+    search_cmds = []
+    search_cog = bot.get_cog("GameSearch")
+    if search_cog:
+        for cmd in search_cog.walk_app_commands():
+            search_cmds.append(f"`/{cmd.name}`: {cmd.description}")
+
+    if search_cmds:
+        embed.add_field(name="Game Search", value="\n".join(search_cmds), inline=False)
 
     # 1. Config Commands
     config_cmds = []
@@ -953,8 +1051,8 @@ async def show_commands(ctx: commands.Context):
         embed.add_field(name="Fun", value="\n".join(fun_cmds), inline=False)
 
     # 4. General/Global Commands
+    # We moved search, so only clear and setup remain
     general_cmds = [
-        "`/search <query>`: Search for games on Online-Fix and FitGirl.",
         "`/clear <amount>`: Clear messages.",
         "`/setup`: Run the interactive setup wizard."
     ]
