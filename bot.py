@@ -809,21 +809,44 @@ async def update_bot(ctx):
 
     await ctx.send("Checking for updates...")
     try:
-        # Run git pull
         import subprocess
         import sys
 
-        process = await asyncio.create_subprocess_shell(
-            "git pull origin main",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate()
+        # Helper to run shell commands
+        async def run_cmd(cmd):
+            process = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            return process.returncode, stdout.decode().strip(), stderr.decode().strip()
 
-        output = stdout.decode().strip()
-        error = stderr.decode().strip()
+        # Try normal pull
+        code, output, error = await run_cmd("git pull origin main")
 
-        if process.returncode != 0:
+        # Check for "Not a git repository" error
+        if code != 0 and "not a git repository" in error.lower():
+            await ctx.send("⚠️ Git repository not detected. Attempting to initialize and repair...")
+
+            # Repair sequence
+            cmds = [
+                "git init",
+                "git remote add origin https://github.com/calibrenyc/CalibreBot.git",
+                "git fetch origin",
+                "git reset --hard origin/main" # Safe for untracked files (.env, guild_configs.json)
+            ]
+
+            for cmd in cmds:
+                c, o, e = await run_cmd(cmd)
+                if c != 0 and "already exists" not in e: # Ignore remote exists error
+                     await ctx.send(f"Repair failed at step: `{cmd}`\nError: `{e}`")
+                     return
+
+            await ctx.send("✅ Repository repaired and synced to latest version.")
+            output = "Repository initialized and reset to origin/main."
+
+        elif code != 0:
             await ctx.send(f"Update failed:\n```\n{error}\n```")
             return
 
@@ -835,7 +858,6 @@ async def update_bot(ctx):
         await log_audit(ctx.guild, f"{ctx.author.mention} initiated bot update via git pull. Restarting...", discord.Color.orange())
 
         # Restart process
-        # This replaces the current process with a new one
         os.execv(sys.executable, ['python'] + sys.argv)
 
     except Exception as e:
