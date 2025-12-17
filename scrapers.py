@@ -1,13 +1,11 @@
 import cloudscraper
 from bs4 import BeautifulSoup
 import re
-import requests
 import os
 
 # --- Configuration ---
 ONLINE_FIX_URL = "https://online-fix.me/index.php?do=search"
-RUTRACKER_LOGIN_URL = "https://rutracker.org/forum/login.php"
-RUTRACKER_SEARCH_URL = "https://rutracker.org/forum/tracker.php"
+FITGIRL_URL = "https://fitgirl-repacks.site/"
 
 BLACKLIST_TITLES = {
     "Gameranger",
@@ -101,105 +99,63 @@ def search_online_fix(query):
     print(f"[Scraper] Online-Fix found {len(results)} results.")
     return results
 
-# Global session for reuse (to persist login cookies)
-_rutracker_session = None
-
-def get_rutracker_session():
-    global _rutracker_session
-    if _rutracker_session:
-        return _rutracker_session
-
-    # Using cookie-based auth to bypass captcha
-    bb_data_cookie = os.getenv("RUTRACKER_COOKIE_BB_DATA")
-
-    if not bb_data_cookie:
-        print("[Scraper] RUTRACKER_COOKIE_BB_DATA not found in environment.")
-        return None
-
-    print("[Scraper] Initializing RuTracker session with cookie...")
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    })
-
-    # Set the cookie directly
-    session.cookies.set('bb_data', bb_data_cookie, domain='.rutracker.org')
-
-    _rutracker_session = session
-    return session
-
-def search_rutracker(query):
+def search_fitgirl(query):
     """
-    Searches rutracker.org for the query using a POST request with authentication.
+    Searches fitgirl-repacks.site for the query.
     """
     results = []
-    print(f"[Scraper] Searching RuTracker for '{query}'...")
-
-    session = get_rutracker_session()
-    if not session:
-        return results
+    print(f"[Scraper] Searching FitGirl for '{query}'...")
     
     try:
-        data = {
-            'nm': query
+        scraper = cloudscraper.create_scraper()
+
+        params = {
+            's': query
         }
 
-        # The search is a POST to tracker.php
-        response = session.post(RUTRACKER_SEARCH_URL, data=data)
-
+        response = scraper.get(FITGIRL_URL, params=params)
         if response.status_code != 200:
-            print(f"[Scraper] RuTracker search failed with status: {response.status_code}")
+            print(f"[Scraper] FitGirl search failed with status: {response.status_code}")
             return results
-
-        # RuTracker encoding is CP1251
-        response.encoding = 'cp1251'
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Results are in #tor-tbl > tbody > tr
-        rows = soup.select("#tor-tbl tr.tCenter.hl-tr")
+        # Results are in h1.entry-title > a
+        titles = soup.select("h1.entry-title > a")
 
-        for row in rows:
+        for t in titles:
             try:
-                # Title link is in td.t-title-col > div.t-title > a
-                title_tag = row.select_one("div.t-title a")
-                if not title_tag:
-                    continue
+                raw_title = t.get_text(strip=True)
+                link = t['href']
                 
-                raw_title = title_tag.get_text(strip=True)
-                # Link is usually 'viewtopic.php?t=...'
-                # Need to prepend domain
-                href_suffix = title_tag['href']
-                link = f"https://rutracker.org/forum/{href_suffix}"
-
                 title = clean_title(raw_title)
+
                 if not title:
                     continue
 
                 results.append({
                     "title": title,
                     "link": link,
-                    "source": "rutracker.org"
+                    "source": "fitgirl-repacks.site"
                 })
             except Exception as e:
-                print(f"[Scraper] Error parsing rutracker row: {e}")
+                print(f"[Scraper] Error parsing fitgirl title: {e}")
                 continue
 
     except Exception as e:
-        print(f"[Scraper] Error searching rutracker: {e}")
+        print(f"[Scraper] Error searching fitgirl: {e}")
         
-    print(f"[Scraper] RuTracker found {len(results)} results.")
+    print(f"[Scraper] FitGirl found {len(results)} results.")
     return results
 
 if __name__ == "__main__":
     # Test execution
     print("Testing Scrapers...")
-    # NOTE: Ensure RUTRACKER_USER and RUTRACKER_PASSWORD are set in env for this to work
 
     # of_res = search_online_fix("cyberpunk")
     # for r in of_res[:3]:
     #    print(r)
         
-    rt_res = search_rutracker("cyberpunk")
-    for r in rt_res[:3]:
+    fg_res = search_fitgirl("cyberpunk")
+    for r in fg_res[:3]:
         print(r)
