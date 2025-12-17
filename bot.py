@@ -40,14 +40,40 @@ class ThreadExistsView(View):
         try:
             # Post in the thread
             await self.thread.send(f"{self.user.mention} Here is the link you requested:\n{self.link_content}")
-            # Confirm to user
-            await interaction.response.edit_message(content=f"Posted in {self.thread.mention}.", view=None)
+
+            # Clear the message
+            try:
+                await interaction.response.defer()
+                if interaction.message:
+                    await interaction.message.delete()
+                else:
+                    await interaction.delete_original_response()
+            except Exception as e:
+                # Fallback if delete fails
+                try:
+                    await interaction.followup.edit_message(message_id=interaction.message.id, content=f"Posted in {self.thread.mention}.", view=None)
+                except:
+                    pass
+
         except Exception as e:
-            await interaction.response.edit_message(content=f"Failed to post in thread: {e}", view=None)
+            try:
+                 await interaction.followup.send(f"Failed to post in thread: {e}", ephemeral=True)
+            except:
+                pass
 
     @discord.ui.button(label="No", style=discord.ButtonStyle.red)
     async def no_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="Okay, please try searching again with a different query.", view=None)
+        try:
+            await interaction.response.defer()
+            if interaction.message:
+                await interaction.message.delete()
+            else:
+                await interaction.delete_original_response()
+        except Exception:
+            try:
+                await interaction.followup.edit_message(message_id=interaction.message.id, content="Request cancelled.", view=None)
+            except:
+                pass
 
 class SearchResultSelect(Select):
     def __init__(self, results, original_interaction_user):
