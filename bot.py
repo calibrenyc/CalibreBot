@@ -446,47 +446,146 @@ async def perform_search(interaction_or_ctx, query, user):
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
 
-# --- SETUP COMMAND ---
-@bot.hybrid_command(name="setup", description="Auto-configure the bot for this server (Admin only)")
+# --- SETUP WIZARD ---
+class RoleSelect(Select):
+    def __init__(self, placeholder, callback_func):
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=[])
+        self.callback_func = callback_func
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.callback_func(interaction, self.values[0])
+
+class RoleSelectView(View):
+    def __init__(self, ctx, roles, callback_func):
+        super().__init__(timeout=120)
+        self.ctx = ctx
+
+        # Create Select Menu
+        # Discord limits select options to 25. We take top 25 roles (excluding @everyone)
+        options = []
+        for role in roles[:25]:
+            options.append(discord.SelectOption(label=role.name, value=str(role.id)))
+
+        select = RoleSelect("Select a role...", callback_func)
+        select.options = options
+        self.add_item(select)
+
+class SetupWizard:
+    def __init__(self, ctx: commands.Context):
+        self.ctx = ctx
+        self.guild = ctx.guild
+        self.step = 1
+
+    async def start(self):
+        await self.ask_owner_role()
+
+    async def ask_owner_role(self):
+        # Filter roles (exclude managed/bot roles if desired, but keeping simple)
+        roles = [r for r in self.guild.roles if not r.is_default() and not r.is_bot_managed()]
+        roles.sort(key=lambda r: r.position, reverse=True)
+
+        view = RoleSelectView(self.ctx, roles, self.set_owner_role)
+        await self.ctx.send("**Step 1/4:** Select the **Owner Role** for the bot configuration.", view=view)
+
+    async def set_owner_role(self, interaction: discord.Interaction, role_id):
+        await interaction.response.defer()
+        # Save owner role (using add_mod_roles logic for now as owner implies mod)
+        # Assuming we just treat owner role as a super-mod or store separate if config supports
+        # Config manager currently has 'mod_roles'. Let's add it there for permission consistency
+        config_manager.add_to_list(self.guild.id, 'mod_roles', int(role_id))
+
+        # Also store explicitly if needed, but config_manager generic update works
+        config_manager.update_guild_config(self.guild.id, 'owner_role_id', int(role_id))
+
+        await interaction.edit_original_response(content=f"Owner Role set to <@&{role_id}>.", view=None)
+        await self.ask_mod_role()
+
+    async def ask_mod_role(self):
+        roles = [r for r in self.guild.roles if not r.is_default() and not r.is_bot_managed()]
+        roles.sort(key=lambda r: r.position, reverse=True)
+
+        view = RoleSelectView(self.ctx, roles, self.set_mod_role)
+        await self.ctx.send("**Step 2/4:** Select the **Moderator Role**.", view=view)
+
+    async def set_mod_role(self, interaction: discord.Interaction, role_id):
+        await interaction.response.defer()
+        config_manager.add_to_list(self.guild.id, 'mod_roles', int(role_id))
+        await interaction.edit_original_response(content=f"Moderator Role set to <@&{role_id}>.", view=None)
+        await self.ask_create_channels()
+
+    async def ask_create_channels(self):
+        view = YesNoView(self.ctx)
+
+        # Define callbacks for Yes/No view to proceed
+        # We need to monkey-patch or handle wait() manually.
+        # Easier to just wait() on the view.
+        msg = await self.ctx.send("**Step 3/4:** Do you want to automatically create a **request channel** and **forum**?", view=view)
+        await view.wait()
+
+        if view.value:
+            # YES - Create channels
+            try:
+                cat = await self.guild.create_category("Game Bot")
+                req = await self.guild.create_text_channel("game-requests", category=cat)
+                forum = await self.guild.create_forum_channel("Game Threads", category=cat)
+
+                config_manager.update_guild_config(self.guild.id, 'forum_channel_id', forum.id)
+                config_manager.add_to_list(self.guild.id, 'allowed_search_channels', req.id)
+
+                await self.ctx.send(f"Created {req.mention} and {forum.mention}.")
+            except Exception as e:
+                await self.ctx.send(f"Failed to create channels: {e}")
+        else:
+            await self.ctx.send("Skipping channel creation.")
+
+        await self.ask_log_channel()
+
+    async def ask_log_channel(self):
+        view = YesNoView(self.ctx)
+        msg = await self.ctx.send("**Step 4/4:** Do you want to create a private **log channel**?", view=view)
+        await view.wait()
+
+        if view.value:
+            try:
+                # Get Configured Roles for permissions
+                config = config_manager.get_guild_config(self.guild.id)
+                mod_roles = config.get('mod_roles', [])
+                owner_role_id = config.get('owner_role_id')
+
+                overwrites = {
+                    self.guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                    self.guild.me: discord.PermissionOverwrite(read_messages=True)
+                }
+
+                # Add overwrites for mods/owner
+                for rid in mod_roles:
+                    role = self.guild.get_role(rid)
+                    if role: overwrites[role] = discord.PermissionOverwrite(read_messages=True)
+
+                cat = discord.utils.get(self.guild.categories, name="Game Bot")
+                log_chan = await self.guild.create_text_channel("bot-logs", category=cat, overwrites=overwrites)
+
+                config_manager.update_guild_config(self.guild.id, 'log_channel_id', log_chan.id)
+                await self.ctx.send(f"Created private log channel: {log_chan.mention}")
+            except Exception as e:
+                await self.ctx.send(f"Failed to create log channel: {e}")
+        else:
+            await self.ctx.send("Skipping log channel.")
+
+        await self.finish()
+
+    async def finish(self):
+        await self.ctx.send("✅ **Setup Complete!**\nYou can further configure the bot using `/config` commands.")
+
+@bot.hybrid_command(name="setup", description="Interactive setup wizard (Admin only)")
 async def setup(ctx: commands.Context):
     # Check Admin
     if not ctx.author.guild_permissions.administrator:
         await ctx.send("You need Administrator permissions to run this command.", ephemeral=True)
         return
 
-    view = YesNoView(ctx)
-    msg = await ctx.send("Do you want to automatically create a 'game-requests' channel, a 'bot-logs' channel, and a 'Game Threads' forum channel?", view=view)
-
-    await view.wait()
-
-    if view.value is None:
-        await ctx.send("Timed out.", ephemeral=True)
-    elif view.value:
-        # User said YES
-        guild = ctx.guild
-        try:
-            # Create Category
-            category = await guild.create_category("Game Bot")
-
-            # Create Text Channels
-            req_channel = await guild.create_text_channel("game-requests", category=category)
-            log_channel = await guild.create_text_channel("bot-logs", category=category)
-
-            # Create Forum Channel
-            forum_channel = await guild.create_forum_channel("Game Threads", category=category)
-
-            # Save Config
-            config_manager.update_guild_config(guild.id, 'forum_channel_id', forum_channel.id)
-            config_manager.update_guild_config(guild.id, 'log_channel_id', log_channel.id)
-            config_manager.add_to_list(guild.id, 'allowed_search_channels', req_channel.id)
-
-            await ctx.send(f"Setup complete!\nRequest Channel: {req_channel.mention}\nLog Channel: {log_channel.mention}\nForum: {forum_channel.mention}\n\nThe bot is now allowed to search in {req_channel.mention}.", ephemeral=True)
-
-        except Exception as e:
-            await ctx.send(f"Error during setup: {e}", ephemeral=True)
-    else:
-        # User said NO
-        await ctx.send("Automatic setup cancelled. Please use `/config` commands to configure manually.", ephemeral=True)
+    wizard = SetupWizard(ctx)
+    await wizard.start()
 
 # --- CONFIG GROUP ---
 class ConfigGroup(commands.GroupCog, name="config"):
