@@ -109,36 +109,24 @@ def get_rutracker_session():
     if _rutracker_session:
         return _rutracker_session
 
-    username = os.getenv("RUTRACKER_USER")
-    password = os.getenv("RUTRACKER_PASSWORD")
+    # Using cookie-based auth to bypass captcha
+    bb_data_cookie = os.getenv("RUTRACKER_COOKIE_BB_DATA")
 
-    if not username or not password:
-        print("[Scraper] RuTracker credentials not found.")
+    if not bb_data_cookie:
+        print("[Scraper] RUTRACKER_COOKIE_BB_DATA not found in environment.")
         return None
 
-    print("[Scraper] Logging into RuTracker...")
+    print("[Scraper] Initializing RuTracker session with cookie...")
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     })
 
-    try:
-        login_data = {
-            'login_username': username,
-            'login_password': password,
-            'login': 'Вход'
-        }
-        resp = session.post(RUTRACKER_LOGIN_URL, data=login_data)
-        if resp.status_code == 200 and 'bb_data' in session.cookies:
-            print("[Scraper] RuTracker login successful.")
-            _rutracker_session = session
-            return session
-        else:
-             print("[Scraper] RuTracker login failed (Check credentials or captcha).")
-             return None
-    except Exception as e:
-        print(f"[Scraper] RuTracker login error: {e}")
-        return None
+    # Set the cookie directly
+    session.cookies.set('bb_data', bb_data_cookie, domain='.rutracker.org')
+
+    _rutracker_session = session
+    return session
 
 def search_rutracker(query):
     """
@@ -158,7 +146,7 @@ def search_rutracker(query):
 
         # The search is a POST to tracker.php
         response = session.post(RUTRACKER_SEARCH_URL, data=data)
-        
+
         if response.status_code != 200:
             print(f"[Scraper] RuTracker search failed with status: {response.status_code}")
             return results
