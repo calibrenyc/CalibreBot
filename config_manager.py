@@ -30,7 +30,9 @@ class ConfigManager:
                 'allowed_search_channels': [],
                 'forum_channel_id': None,
                 'log_channel_id': None,
-                'mod_roles': []
+                'mod_roles': [],
+                'owner_role_id': None,
+                'muted_role_id': None
             }
             self.save_config()
         return self.configs[str_id]

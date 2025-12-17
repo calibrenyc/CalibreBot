@@ -640,6 +640,50 @@ class ConfigGroup(commands.GroupCog, name="config"):
         await interaction.response.send_message(f"Added {role.mention} as a moderator role.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} added Mod Role {role.mention}.")
 
+    @discord.app_commands.command(name="set_muted_role", description="Set the role to use for muting users")
+    async def set_muted_role(self, interaction: discord.Interaction, role: discord.Role):
+        config_manager.update_guild_config(interaction.guild_id, 'muted_role_id', role.id)
+        await interaction.response.send_message(f"Muted role set to {role.mention}.", ephemeral=True)
+        await log_audit(interaction.guild, f"{interaction.user.mention} set Muted Role to {role.mention}.")
+
+    @discord.app_commands.command(name="create_muted_role", description="Create a new Muted role with permissions")
+    async def create_muted_role(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+
+        try:
+            # Create Role
+            muted_role = await guild.create_role(name="Muted", reason="Bot Config: Create Muted Role")
+
+            # Position Role
+            # Attempt to place it below the bot's highest role
+            try:
+                # Find bot's top role
+                bot_top_role = guild.me.top_role
+                await muted_role.edit(position=bot_top_role.position - 1)
+            except Exception as e:
+                print(f"Could not move role position: {e}")
+
+            # Apply Overwrites to Channels
+            perms = discord.PermissionOverwrite(send_messages=False, speak=False, add_reactions=False)
+
+            count = 0
+            for channel in guild.channels:
+                try:
+                    await channel.set_permissions(muted_role, overwrite=perms, reason="Bot Config: Apply Muted Role")
+                    count += 1
+                except:
+                    pass
+
+            # Save Config
+            config_manager.update_guild_config(guild.id, 'muted_role_id', muted_role.id)
+
+            await interaction.followup.send(f"Created {muted_role.mention} and applied overwrites to {count} channels.", ephemeral=True)
+            await log_audit(guild, f"{interaction.user.mention} created new Muted Role {muted_role.mention}.")
+
+        except Exception as e:
+            await interaction.followup.send(f"Failed to create muted role: {e}", ephemeral=True)
+
     @discord.app_commands.command(name="list", description="List current configuration")
     async def list_config(self, interaction: discord.Interaction):
         config = config_manager.get_guild_config(interaction.guild_id)
@@ -662,10 +706,96 @@ class ConfigGroup(commands.GroupCog, name="config"):
 
         embed.add_field(name="Moderator Roles", value=fmt_roles(config.get('mod_roles')), inline=False)
 
+        mid = config.get('muted_role_id')
+        embed.add_field(name="Muted Role", value=f"<@&{mid}>" if mid else "Not Set", inline=False)
+
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# --- MODERATION COG ---
+class Moderation(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if is_admin_or_mod(interaction):
+            return True
+        await interaction.response.send_message("You do not have permission to use moderation commands.", ephemeral=True)
+        return False
+
+    @discord.app_commands.command(name="kick", description="Kick a user from the server")
+    async def kick(self, interaction: discord.Interaction, user: discord.Member, reason: str = "No reason provided"):
+        try:
+            await user.kick(reason=reason)
+            await interaction.response.send_message(f"Kicked {user.mention}. Reason: {reason}", ephemeral=True)
+            await log_audit(interaction.guild, f"{interaction.user.mention} kicked {user.mention} (ID: {user.id}). Reason: {reason}", discord.Color.orange())
+        except discord.Forbidden:
+            await interaction.response.send_message("I do not have permission to kick this user.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Failed to kick user: {e}", ephemeral=True)
+
+    @discord.app_commands.command(name="ban", description="Ban a user from the server")
+    async def ban(self, interaction: discord.Interaction, user: discord.Member, reason: str = "No reason provided"):
+        try:
+            await user.ban(reason=reason)
+            await interaction.response.send_message(f"Banned {user.mention}. Reason: {reason}", ephemeral=True)
+            await log_audit(interaction.guild, f"{interaction.user.mention} banned {user.mention} (ID: {user.id}). Reason: {reason}", discord.Color.red())
+        except discord.Forbidden:
+            await interaction.response.send_message("I do not have permission to ban this user.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Failed to ban user: {e}", ephemeral=True)
+
+    @discord.app_commands.command(name="mute", description="Mute a user")
+    async def mute(self, interaction: discord.Interaction, user: discord.Member, reason: str = "No reason provided"):
+        config = config_manager.get_guild_config(interaction.guild_id)
+        muted_role_id = config.get('muted_role_id')
+
+        if not muted_role_id:
+            await interaction.response.send_message("No Muted role configured. Use `/config set_muted_role` or `/config create_muted_role` first.", ephemeral=True)
+            return
+
+        role = interaction.guild.get_role(int(muted_role_id))
+        if not role:
+            await interaction.response.send_message("Configured Muted role not found in server.", ephemeral=True)
+            return
+
+        try:
+            await user.add_roles(role, reason=reason)
+            await interaction.response.send_message(f"Muted {user.mention}. Reason: {reason}", ephemeral=True)
+            await log_audit(interaction.guild, f"{interaction.user.mention} muted {user.mention}. Reason: {reason}", discord.Color.yellow())
+        except discord.Forbidden:
+            await interaction.response.send_message("I do not have permission to assign the Muted role.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Failed to mute user: {e}", ephemeral=True)
+
+    @discord.app_commands.command(name="unmute", description="Unmute a user")
+    async def unmute(self, interaction: discord.Interaction, user: discord.Member):
+        config = config_manager.get_guild_config(interaction.guild_id)
+        muted_role_id = config.get('muted_role_id')
+
+        if not muted_role_id:
+            await interaction.response.send_message("No Muted role configured.", ephemeral=True)
+            return
+
+        role = interaction.guild.get_role(int(muted_role_id))
+        if not role:
+            await interaction.response.send_message("Configured Muted role not found.", ephemeral=True)
+            return
+
+        try:
+            if role in user.roles:
+                await user.remove_roles(role, reason="Unmute command")
+                await interaction.response.send_message(f"Unmuted {user.mention}.", ephemeral=True)
+                await log_audit(interaction.guild, f"{interaction.user.mention} unmuted {user.mention}.", discord.Color.green())
+            else:
+                await interaction.response.send_message(f"{user.mention} is not muted.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("I do not have permission to remove the Muted role.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Failed to unmute user: {e}", ephemeral=True)
 
 async def setup_cogs():
     await bot.add_cog(ConfigGroup(bot))
+    await bot.add_cog(Moderation(bot))
 
 @bot.hybrid_command(name="search", description="Search for games on Online-Fix and FitGirl")
 @discord.app_commands.describe(query="The game to search for")
