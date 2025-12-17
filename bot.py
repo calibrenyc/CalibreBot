@@ -793,9 +793,69 @@ class Moderation(commands.Cog):
         except Exception as e:
             await interaction.response.send_message(f"Failed to unmute user: {e}", ephemeral=True)
 
+# --- FUN COG ---
+class Fun(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if is_admin_or_mod(interaction):
+            return True
+        await interaction.response.send_message("You do not have permission to use fun commands.", ephemeral=True)
+        return False
+
+    @discord.app_commands.command(name="random_move", description="Randomly move a user between voice channels 10 times")
+    @discord.app_commands.describe(user="The user to move")
+    async def random_move(self, interaction: discord.Interaction, user: discord.Member):
+        if not user.voice or not user.voice.channel:
+            await interaction.response.send_message(f"{user.mention} is not in a voice channel.", ephemeral=True)
+            return
+
+        # Get all voice channels in the guild
+        voice_channels = interaction.guild.voice_channels
+        if len(voice_channels) < 2:
+            await interaction.response.send_message("Not enough voice channels to perform random moves.", ephemeral=True)
+            return
+
+        await interaction.response.send_message(f"Starting random move for {user.mention}...", ephemeral=True)
+        await log_audit(interaction.guild, f"{interaction.user.mention} started random_move on {user.mention}.", discord.Color.purple())
+
+        import random
+
+        try:
+            for i in range(10):
+                # Check if user is still connected
+                if not user.voice:
+                    break
+
+                # Pick a random channel different from current
+                current_channel = user.voice.channel
+                available_channels = [c for c in voice_channels if c.id != current_channel.id]
+
+                if not available_channels:
+                    break
+
+                target_channel = random.choice(available_channels)
+
+                try:
+                    await user.move_to(target_channel, reason="Random Move Fun Command")
+                except discord.Forbidden:
+                    await interaction.followup.send("I don't have permission to move this user.", ephemeral=True)
+                    return
+                except Exception:
+                    pass # Ignore move errors (e.g. user disconnected)
+
+                await asyncio.sleep(1.5) # Sleep to avoid rate limits
+
+            await interaction.followup.send(f"Finished moving {user.mention}.", ephemeral=True)
+
+        except Exception as e:
+            await interaction.followup.send(f"Error during random move: {e}", ephemeral=True)
+
 async def setup_cogs():
     await bot.add_cog(ConfigGroup(bot))
     await bot.add_cog(Moderation(bot))
+    await bot.add_cog(Fun(bot))
 
 @bot.hybrid_command(name="search", description="Search for games on Online-Fix and FitGirl")
 @discord.app_commands.describe(query="The game to search for")
