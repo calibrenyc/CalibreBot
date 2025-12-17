@@ -319,17 +319,26 @@ def is_admin_or_mod(obj):
 
     return False
 
-async def log_error(guild, message):
+async def log_audit(guild, message, color=discord.Color.blue()):
+    """
+    Logs an action to the configured log channel.
+    """
     if not guild: return
     config = config_manager.get_guild_config(guild.id)
     log_channel_id = config.get('log_channel_id')
+
     if log_channel_id:
         try:
             channel = guild.get_channel(int(log_channel_id))
             if channel:
-                await channel.send(f"[Error] {message}")
+                embed = discord.Embed(description=message, color=color, timestamp=discord.utils.utcnow())
+                await channel.send(embed=embed)
         except Exception as e:
-            print(f"Failed to log error to channel {log_channel_id}: {e}")
+            print(f"Failed to log to channel {log_channel_id}: {e}")
+
+# Legacy alias
+async def log_error(guild, message):
+    await log_audit(guild, f"**Error:** {message}", discord.Color.red())
 
 async def perform_search(interaction_or_ctx, query, user):
     """
@@ -576,6 +585,7 @@ class SetupWizard:
 
     async def finish(self):
         await self.ctx.send("✅ **Setup Complete!**\nYou can further configure the bot using `/config` commands.")
+        await log_audit(self.guild, f"**Setup Wizard** completed by {self.ctx.author.mention}.", discord.Color.green())
 
 @bot.hybrid_command(name="setup", description="Interactive setup wizard (Admin only)")
 async def setup(ctx: commands.Context):
@@ -584,6 +594,7 @@ async def setup(ctx: commands.Context):
         await ctx.send("You need Administrator permissions to run this command.", ephemeral=True)
         return
 
+    await log_audit(ctx.guild, f"**Setup Wizard** started by {ctx.author.mention}.")
     wizard = SetupWizard(ctx)
     await wizard.start()
 
@@ -602,26 +613,32 @@ class ConfigGroup(commands.GroupCog, name="config"):
     async def allow_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         config_manager.add_to_list(interaction.guild_id, 'allowed_search_channels', channel.id)
         await interaction.response.send_message(f"Added {channel.mention} to allowed search channels.", ephemeral=True)
+        await log_audit(interaction.guild, f"{interaction.user.mention} allowed search in {channel.mention}.")
 
     @discord.app_commands.command(name="disallow_channel", description="Disallow searching in a text channel")
     async def disallow_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         config_manager.remove_from_list(interaction.guild_id, 'allowed_search_channels', channel.id)
         await interaction.response.send_message(f"Removed {channel.mention} from allowed search channels.", ephemeral=True)
+        await log_audit(interaction.guild, f"{interaction.user.mention} disallowed search in {channel.mention}.")
 
     @discord.app_commands.command(name="set_forum", description="Set the forum channel for game threads")
     async def set_forum(self, interaction: discord.Interaction, channel: discord.ForumChannel):
         config_manager.update_guild_config(interaction.guild_id, 'forum_channel_id', channel.id)
         await interaction.response.send_message(f"Forum channel set to {channel.mention}.", ephemeral=True)
+        await log_audit(interaction.guild, f"{interaction.user.mention} set Forum Channel to {channel.mention}.")
 
     @discord.app_commands.command(name="set_logs", description="Set the log channel for bot errors")
     async def set_logs(self, interaction: discord.Interaction, channel: discord.TextChannel):
         config_manager.update_guild_config(interaction.guild_id, 'log_channel_id', channel.id)
         await interaction.response.send_message(f"Log channel set to {channel.mention}.", ephemeral=True)
+        # Log to the new channel
+        await log_audit(interaction.guild, f"{interaction.user.mention} set Log Channel to {channel.mention}.")
 
     @discord.app_commands.command(name="add_mod_role", description="Add a role that can manage bot config")
     async def add_mod_role(self, interaction: discord.Interaction, role: discord.Role):
         config_manager.add_to_list(interaction.guild_id, 'mod_roles', role.id)
         await interaction.response.send_message(f"Added {role.mention} as a moderator role.", ephemeral=True)
+        await log_audit(interaction.guild, f"{interaction.user.mention} added Mod Role {role.mention}.")
 
     @discord.app_commands.command(name="list", description="List current configuration")
     async def list_config(self, interaction: discord.Interaction):
@@ -718,6 +735,7 @@ async def clear(ctx: commands.Context, amount: int = 10):
     try:
         deleted = await ctx.channel.purge(limit=amount)
         msg = await ctx.send(f"Deleted {len(deleted)} messages.", ephemeral=True)
+        await log_audit(ctx.guild, f"{ctx.author.mention} cleared {len(deleted)} messages in {ctx.channel.mention}.")
         
         if not ctx.interaction:
             await asyncio.sleep(3)
