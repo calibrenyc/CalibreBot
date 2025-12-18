@@ -812,54 +812,59 @@ async def update_bot(ctx):
         import subprocess
         import sys
 
-        # Helper to run shell commands
+        # Helper to run shell commands with NO prompts
         async def run_cmd(cmd):
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0" # Disable prompts
+
             process = await asyncio.create_subprocess_shell(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stderr=subprocess.PIPE,
+                env=env
             )
             stdout, stderr = await process.communicate()
             return process.returncode, stdout.decode().strip(), stderr.decode().strip()
 
-        # Try normal pull
-        code, output, error = await run_cmd("git pull origin main")
+        # Determine Pull Target
+        # Priority: GIT_REPO_URL > GITHUB_TOKEN > origin main
+        custom_url = os.getenv('GIT_REPO_URL')
+        gh_token = os.getenv('GITHUB_TOKEN')
+
+        # Default target
+        pull_cmd = "git pull origin main"
+        repo_url = "https://github.com/calibrenyc/CalibreBot.git"
+
+        if custom_url:
+            pull_cmd = f"git pull {custom_url} main"
+            repo_url = custom_url
+        elif gh_token:
+            repo_url = f"https://{gh_token}@github.com/calibrenyc/CalibreBot.git"
+            pull_cmd = f"git pull {repo_url} main"
+
+        # Try pull
+        code, output, error = await run_cmd(pull_cmd)
 
         # Check for "Not a git repository" error
         if code != 0 and "not a git repository" in error.lower():
             await ctx.send("⚠️ Git repository not detected. Attempting to initialize and repair...")
-
-            # Determine URL
-            # Priority: GIT_REPO_URL (SSH/Custom) > GITHUB_TOKEN (HTTPS) > Default HTTPS
-            custom_url = os.getenv('GIT_REPO_URL')
-            gh_token = os.getenv('GITHUB_TOKEN')
-
-            repo_url = "https://github.com/calibrenyc/CalibreBot.git"
-
-            if custom_url:
-                repo_url = custom_url
-            elif gh_token:
-                repo_url = f"https://{gh_token}@github.com/calibrenyc/CalibreBot.git"
 
             # Repair sequence
             cmds = [
                 "git init",
                 f"git remote add origin {repo_url}",
                 "git fetch origin",
-                "git reset --hard origin/main" # Safe for untracked files (.env, guild_configs.json)
+                "git reset --hard origin/main" # Safe for untracked files
             ]
 
             for cmd in cmds:
                 c, o, e = await run_cmd(cmd)
                 if c != 0:
-                    # Ignore remote exists error, but if it exists, update url to be safe
+                    # Handle "remote already exists"
                     if "already exists" in e:
                          await run_cmd(f"git remote set-url origin {repo_url}")
-                         # Retry the command that failed if it wasn't just setting remote
-                         if "remote add" not in cmd:
-                             # Actually if set-url succeeded, we should retry the fetch/reset?
-                             # Simplest is to just continue loop, but "remote add" was the step that failed.
-                             # Next step is fetch.
+                         # Retry fetch if this was the add step
+                         if "remote add" in cmd:
                              continue
 
                     await ctx.send(f"Repair failed at step: `{cmd}`\nError: `{e}`")
@@ -869,33 +874,11 @@ async def update_bot(ctx):
             output = "Repository initialized and reset to origin/main."
 
         elif code != 0:
-            # Check for Authentication Failed
-            if "authentication failed" in error.lower() or "could not read username" in error.lower():
-                 custom_url = os.getenv('GIT_REPO_URL')
-                 gh_token = os.getenv('GITHUB_TOKEN')
-
-                 new_url = None
-                 if custom_url:
-                     new_url = custom_url
-                 elif gh_token:
-                     new_url = f"https://{gh_token}@github.com/calibrenyc/CalibreBot.git"
-
-                 if new_url:
-                     await ctx.send("⚠️ Authentication failed. Retrying with configured Repo URL/Token...")
-
-                     # Update remote and retry pull
-                     await run_cmd(f"git remote set-url origin {new_url}")
-                     code, output, error = await run_cmd("git pull origin main")
-
-                     if code != 0:
-                         await ctx.send(f"Update failed after retry:\n```\n{error}\n```")
-                         return
-                 else:
-                     await ctx.send(f"❌ Update failed: Authentication required. Please add `GIT_REPO_URL` (for SSH) or `GITHUB_TOKEN` to your `.env` file.\n```\n{error}\n```")
-                     return
+            if "authentication failed" in error.lower():
+                await ctx.send(f"❌ Authentication Failed. Please check your `GITHUB_TOKEN` in `.env`.\nError: `{error}`")
             else:
                 await ctx.send(f"Update failed:\n```\n{error}\n```")
-                return
+            return
 
         if "Already up to date" in output:
             await ctx.send("Bot is already up to date.")
