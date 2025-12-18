@@ -1,73 +1,43 @@
-# Calibre Search Bot - Version 2.0 Release Notes
+# Calibre Search Bot - Version 2.1.0 Release Notes
 
-We are excited to announce the release of **Calibre Search Bot v2.0**! This major update brings a complete overhaul of the configuration system, a smarter thread management engine, and new moderation tools.
+**Version 2.1.0** is a massive update introducing persistent storage (SQLite), an economy system, leveling, advanced tracking, and birthdays!
 
 ## 🌟 New Features
 
-### 🧵 Smart Thread Scanning
-*   **Prevent Duplicates:** The bot now intelligently scans both *active* and *archived* threads in your forum channel before creating a new one.
-*   **Interactive Prompt:** If a thread with the same game title exists, the bot will ask if you want to be linked to that thread instead of cluttering the channel with a duplicate.
-*   **Discord API Compliance:** Game titles are automatically truncated to 100 characters to prevent errors and ensure consistent matching with Discord thread names.
+### 💾 Persistent Database (SQLite)
+*   Moved from JSON to a robust SQLite database (`bot_data.db`).
+*   **Migration:** Automatically migrates your existing `guild_configs.json` on startup.
 
-### 🔍 Enhanced Search Engine
-*   **New Providers:** We have switched our search providers to **FitGirl Repacks** (via `cloudscraper` for bot protection bypass) and **Online-Fix**.
-*   **Strict Filtering:** Results are prioritized. Exact title matches appear first. If none are found, "Similar Titles" are displayed.
-*   **Retry Option:** The search dropdown now includes a "None of the options above" button, allowing you to instantly retry with a refined query.
-*   **Dedicated Category:** The `/search` command now lives in its own "Game Search" category in the help menu.
+### 🛡️ Activity Tracking & Moderation
+*   **Voice Logging:** Logs when users join/leave voice channels and calculates the duration of their session.
+*   **Kick Detection:** Detects if a member was kicked (via Audit Logs) and logs the moderator responsible.
+*   **Flagged Words:** Logs usage of blacklisted words to the bot-log channel.
+*   **New Commands:**
+    *   `/warn <user> <reason>`: Issues a warning and tracks it in the database.
+    *   `/modlogs <user>`: View a user's warning history.
+    *   `/tempmute <user> <duration>`: Uses Discord's native Timeout feature.
 
-### ⚙️ Robust Configuration System
-*   **Per-Guild Config:** All settings (channels, roles, logs) are now saved per-guild in `guild_configs.json`.
-*   **Interactive Wizard:** Run `/setup` for a guided, step-by-step installation (Restricted to **Server Owner only**).
-*   **Simplified Commands:** We've streamlined the command names for better usability:
-    *   `/config add_mod` / `/config remove_mod`
-    *   `/config allow` / `/config deny` (for channel permissions)
-    *   `/config forum` / `/config logs`
-    *   `/config muted_role` / `/config create_mute`
-*   **Smart Mute Setup:** `/config create_mute` now checks if a role is already configured and offers to remove the existing configuration safely.
+### 📈 Leveling System
+*   **XP Sources:** Earn XP by chatting and spending time in voice channels.
+*   **Rank Card:** `/rank` generates a beautiful image card showing your avatar, level, and progress bar.
+*   **Customization:** Users can set their own card background (`/rank settings background`) and accent color.
 
-### 🛡️ Moderation & Fun
-*   **New Moderation Cog:** Built-in commands for `/kick`, `/ban`, `/mute`, and `/unmute`.
-*   **Audit Logging:** Critical actions (setup, config changes, mod actions) are logged to your configured log channel with timestamps and user info.
-*   **Fun Commands:** Added `/random_move` to randomly move a user between voice channels (great for trolling friends!).
+### 💰 Global Economy & Shop
+*   **Global Balance:** Your coin balance follows you across all servers using this bot.
+*   **Daily Rewards:** `/daily` gives coins once every 24 hours.
+*   **Gambling:** `/gamble rps` (Rock Paper Scissors) to double your money (or lose it!).
+*   **Server Shop:** Admins can create items (`/shop add`) that award Roles when bought (`/shop buy`).
+*   **Betting System:** Create custom bets (`/bet create`) for server events, let users place bets (`/bet place`), and resolve them to distribute the pot (`/bet resolve`).
 
-## 🐛 Bug Fixes & Improvements
+### 🎂 Birthdays
+*   **Set Birthday:** `/birthday set DD/MM`.
+*   **Announcements:** The bot automatically wishes users a Happy Birthday in the server.
 
-*   **Duplicate Commands Fix:** Added a text-based `!fix_duplicates` command (Admin only) to clear guild-specific slash commands, resolving the issue where commands appeared twice.
-*   **Command Sync:** Added `!sync` to force-register slash commands if they don't appear immediately.
-*   **Stability:** Fixed issues with long thread titles crashing the bot.
-*   **Cleanliness:** Interaction messages (prompts, confirmations) are now auto-deleted to keep your channels clean.
+## 🛠️ Improvements
+*   **Rich Embeds:** All logs and command responses now use formatted Embeds for a cleaner look.
+*   **Async Logic:** The entire configuration system was rewritten to be asynchronous for better performance.
 
-## 📋 How to Update
-
-1.  **Pull the latest code.**
-2.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-3.  **Run the bot:**
-    ```bash
-    python bot.py
-    ```
-4.  **Run Setup (if new):**
-    ```
-    /setup
-    ```
-5.  **Fix Duplicates (if updating):**
-    Run `!fix_duplicates` in your server to clean up old command registrations.
-
-# Calibre Search Bot - Version 2.0.2
-
-This minor update introduces quality-of-life improvements for bot maintenance and command usage.
-
-## 🚀 New Features
-
-### 🔄 Self-Update Command
-*   **Easy Updates:** Admins can now run `@Bot update` (or `!update`) to automatically pull the latest code from GitHub and restart the bot. No more manual terminal work!
-
-### 📣 Mention-Based Commands
-*   **No More Prefix Conflicts:** You can now trigger text commands by mentioning the bot.
-    *   Example: `@CalibreBot sync` works the same as `!sync`.
-    *   The `!` prefix is still supported as a fallback.
-
-## 🔧 Improvements
-*   **Version Tracking:** The bot now logs its version number on startup.
+## 📋 Update Instructions
+1.  Pull the latest code.
+2.  Install new dependencies: `pip install -r requirements.txt` (Adds `Pillow` and `aiosqlite`).
+3.  Restart the bot. It will automatically migrate your config.
