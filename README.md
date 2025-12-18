@@ -1,14 +1,45 @@
-# CALIBRE SEARCH BOT v2.0
+# CALIBRE SEARCH BOT v2.1.0
 
-A Discord bot for searching game repacks (FitGirl, Online-Fix), managing server configurations, and basic moderation.
+A Discord bot for searching game repacks (FitGirl, Online-Fix), managing server configurations, and advanced features like economy, leveling, and moderation.
 
 ## Features
 
-- **Game Search:** Search FitGirl Repacks and Online-Fix for games.
-- **Thread Scanning:** Automatically checks for existing threads to prevent duplicates.
-- **Configuration System:** Interactive setup and granular configuration for roles and channels.
-- **Moderation:** Kick, Ban, Mute, Unmute.
-- **Fun:** Random Move command.
+### 🎮 Game Search
+- **Providers:** FitGirl Repacks, Online-Fix.
+- **Smart Search:** Prevents duplicate threads by scanning for existing ones.
+- **Commands:** `/search <query>`, `@CalibreBot search <query>`.
+
+### 🛡️ Moderation & Tracking
+- **Logging:** Voice join/leave durations, kicks, and flagged words logged to `bot-logs`.
+- **Commands:**
+    - `/warn <user> <reason>`: Warn a user and log it.
+    - `/tempmute <user> <duration>`: Timeout a user.
+    - `/modlogs <user>`: View warning history.
+    - `/kick`, `/ban`, `/mute`, `/unmute`.
+
+### 📈 Leveling System
+- **XP:** Earn XP from messaging and voice chat activity.
+- **Rank Card:** `/rank` displays a custom profile card with your level and progress.
+- **Customization:** `/rank settings background <url>`, `/rank settings color <hex>`.
+
+### 💰 Economy System
+- **Global Currency:** Users keep their balance across servers.
+- **Commands:**
+    - `/daily`: Claim daily coins.
+    - `/balance`: Check your wallet.
+    - `/gamble rps <amount> <choice>`: Play Rock-Paper-Scissors.
+    - `/shop list`: View items/roles for sale in the server.
+    - `/shop buy <item>`: Buy items.
+    - `/bet`: Create and place custom bets on events.
+
+### 🎂 Birthdays
+- `/birthday set DD/MM`: Set your birthday.
+- **Notifications:** Daily announcements in the general/log channel.
+
+### ⚙️ Configuration
+- **Setup Wizard:** `/setup` (Server Owner only).
+- **Settings:** `/config <allow/deny/forum/logs/add_mod...>`
+- **Auto-Update:** `@CalibreBot update` (Admin only) - Supports private repos via `.env`.
 
 ## Setup
 
@@ -17,52 +48,17 @@ A Discord bot for searching game repacks (FitGirl, Online-Fix), managing server 
    pip install -r requirements.txt
    ```
 
-2. **Environment Variables:**
-   Create a `.env` file:
+2. **Environment Variables (.env):**
    ```env
-   DISCORD_TOKEN=your_token_here
+   DISCORD_TOKEN=your_token
+   GITHUB_TOKEN=your_pat_token # Optional: For auto-updating from private repos
    ```
 
-3. **Run the Bot:**
+3. **Run:**
    ```bash
    python bot.py
    ```
 
-4. **Initial Configuration:**
-   Run the interactive setup wizard in your server (requires Server Owner):
-   ```
-   /setup
-   ```
-
-## Commands
-
-### Game Search
-- `/search <query>`: Search for a game. If a thread exists, it will link you to it.
-
-### Configuration (Admin/Mod)
-- `/setup`: Run the interactive setup wizard (Server Owner Only).
-- `/config allow <channel>`: Allow searching in a text channel.
-- `/config deny <channel>`: Disallow searching in a text channel.
-- `/config forum <channel>`: Set the forum channel for game threads.
-- `/config logs <channel>`: Set the log channel.
-- `/config add_mod <role>`: Add a moderator role.
-- `/config remove_mod <role>`: Remove a moderator role.
-- `/config muted_role <role>`: Set the Muted role.
-- `/config create_mute`: Create a Muted role with channel overwrites.
-- `/config list`: List current configuration.
-
-### Moderation
-- `/kick <user>`
-- `/ban <user>`
-- `/mute <user>`
-- `/unmute <user>`
-- `/clear <amount>`: Clear messages.
-
-### Fun
-- `/random_move <user> <rounds>`: Move a user between voice channels.
-
-### Troubleshooting & Maintenance
-- `@Bot update`: Pulls the latest code from GitHub and restarts the bot (Admin only).
-- `@Bot fix_duplicates`: Run this if you see duplicate slash commands.
-- `@Bot sync`: Force sync commands to the current guild.
-*Note: You can use these commands by mentioning the bot (e.g., `@CalibreBot update`) or using the `!` prefix.*
+## Troubleshooting
+- **Updates:** If auto-update fails on a private repo, ensure `GITHUB_TOKEN` is set in `.env` or use `GIT_REPO_URL`.
+- **Database:** Data is stored in `bot_data.db`. Do not delete this file unless you want to reset everything.

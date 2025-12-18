@@ -1,63 +1,47 @@
-import json
-import os
+# This file is now a wrapper around the DB manager for backward compatibility
+# or we can fully replace it. For now, let's keep the class interface but use DB.
 
-CONFIG_FILE = 'guild_configs.json'
+import json
+from database import db_manager
+import asyncio
 
 class ConfigManager:
-    def __init__(self):
-        self.configs = {}
-        self.load_config()
+    # We need to bridge synchronous calls (if any) to async,
+    # but bot.py commands are async, so we can switch to async methods.
 
-    def load_config(self):
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, 'r') as f:
-                    self.configs = json.load(f)
-            except json.JSONDecodeError:
-                print("Error decoding config file. Starting with empty config.")
-                self.configs = {}
-        else:
-            self.configs = {}
+    # However, to minimize refactoring pain in step 1,
+    # we might need to update bot.py to await these calls.
+    # YES: bot.py needs to be updated to await config calls.
 
-    def save_config(self):
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(self.configs, f, indent=4)
+    async def get_guild_config(self, guild_id):
+        data = await db_manager.get_guild_config(guild_id)
+        if not data: return {}
+        # Parse JSON lists
+        if 'allowed_search_channels' in data and data['allowed_search_channels']:
+            try: data['allowed_search_channels'] = json.loads(data['allowed_search_channels'])
+            except: data['allowed_search_channels'] = []
 
-    def get_guild_config(self, guild_id):
-        str_id = str(guild_id)
-        if str_id not in self.configs:
-            self.configs[str_id] = {
-                'allowed_search_channels': [],
-                'forum_channel_id': None,
-                'log_channel_id': None,
-                'mod_roles': [],
-                'owner_role_id': None,
-                'muted_role_id': None
-            }
-            self.save_config()
-        return self.configs[str_id]
+        if 'mod_roles' in data and data['mod_roles']:
+            try: data['mod_roles'] = json.loads(data['mod_roles'])
+            except: data['mod_roles'] = []
 
-    def update_guild_config(self, guild_id, key, value):
-        str_id = str(guild_id)
-        if str_id not in self.configs:
-            self.get_guild_config(guild_id)
+        return data
 
-        self.configs[str_id][key] = value
-        self.save_config()
+    async def update_guild_config(self, guild_id, key, value):
+        await db_manager.update_guild_config(guild_id, key, value)
 
-    def add_to_list(self, guild_id, key, value):
-        str_id = str(guild_id)
-        if str_id not in self.configs:
-            self.get_guild_config(guild_id)
+    async def add_to_list(self, guild_id, key, value):
+        config = await self.get_guild_config(guild_id)
+        current_list = config.get(key, [])
+        if value not in current_list:
+            current_list.append(value)
+            await db_manager.update_guild_config(guild_id, key, current_list)
 
-        if value not in self.configs[str_id].get(key, []):
-            self.configs[str_id][key].append(value)
-            self.save_config()
-
-    def remove_from_list(self, guild_id, key, value):
-        str_id = str(guild_id)
-        if str_id in self.configs and value in self.configs[str_id].get(key, []):
-            self.configs[str_id][key].remove(value)
-            self.save_config()
+    async def remove_from_list(self, guild_id, key, value):
+        config = await self.get_guild_config(guild_id)
+        current_list = config.get(key, [])
+        if value in current_list:
+            current_list.remove(value)
+            await db_manager.update_guild_config(guild_id, key, current_list)
 
 config_manager = ConfigManager()

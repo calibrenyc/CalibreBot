@@ -1,5 +1,7 @@
 discord.py
-requests
-beautifulsoup4
 python-dotenv
+beautifulsoup4
+requests
 cloudscraper
+Pillow
+aiosqlite

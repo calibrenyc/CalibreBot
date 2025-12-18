@@ -7,6 +7,7 @@ import scrapers
 import asyncio
 import random
 from config_manager import config_manager
+from database import db_manager
 
 # Load environment variables
 load_dotenv()
@@ -15,17 +16,24 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.0.6"
+BOT_VERSION = "2.1.0"
 
 # Setup Bot
 class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
+        intents.members = True # Required for Member updates/joins
+        intents.voice_states = True # Required for Voice tracking
+
         # Prefix '!' OR mentioning the bot
         super().__init__(command_prefix=commands.when_mentioned_or("!"), intents=intents)
 
     async def setup_hook(self):
+        # Initialize DB
+        await db_manager.init_db()
+        await db_manager.migrate_from_json()
+
         # Sync slash commands globally
         await self.tree.sync()
         print(f"Commands synced. Bot Version: {BOT_VERSION}")
@@ -175,7 +183,7 @@ class SearchResultSelect(Select):
 
             # --- Get Configured Destination Channel ---
             guild_id = interaction.guild_id
-            config = config_manager.get_guild_config(guild_id)
+            config = await config_manager.get_guild_config(guild_id)
             forum_channel_id = config.get('forum_channel_id')
 
             destination_channel = None
@@ -284,8 +292,8 @@ class SearchView(View):
         super().__init__()
         self.add_item(SearchResultSelect(results, original_user))
 
-# Helper to check permissions
-def is_admin_or_mod(obj):
+# Helper to check permissions (Async now)
+async def is_admin_or_mod(obj):
     """
     Checks if the user executing the command (Context or Interaction) is an Admin or Mod.
     obj: can be discord.Interaction or commands.Context
@@ -297,17 +305,15 @@ def is_admin_or_mod(obj):
         return False # No permissions in DMs usually
 
     # Check Administrator Permission
-    # For Context, permissions are in channel_permissions or guild_permissions
     if isinstance(obj, commands.Context):
         if obj.author.guild_permissions.administrator:
             return True
     else:
-        # Interaction
         if obj.permissions.administrator:
             return True
 
-    # Check Configured Mod Roles
-    config = config_manager.get_guild_config(guild.id)
+    # Check Configured Mod Roles via DB
+    config = await config_manager.get_guild_config(guild.id)
     mod_roles = config.get('mod_roles', [])
 
     if mod_roles:
@@ -315,7 +321,7 @@ def is_admin_or_mod(obj):
             if role.id in mod_roles:
                 return True
 
-    # Fallback to OWNER_ROLE_ID if set (legacy support)
+    # Fallback
     if OWNER_ROLE_ID:
         try:
             if any(r.id == int(OWNER_ROLE_ID) for r in user.roles):
@@ -330,7 +336,7 @@ async def log_audit(guild, message, color=discord.Color.blue()):
     Logs an action to the configured log channel.
     """
     if not guild: return
-    config = config_manager.get_guild_config(guild.id)
+    config = await config_manager.get_guild_config(guild.id)
     log_channel_id = config.get('log_channel_id')
 
     if log_channel_id:
@@ -357,7 +363,7 @@ async def perform_search(interaction_or_ctx, query, user):
 
     # Permission Check: Allowed Channels
     if guild_id:
-        config = config_manager.get_guild_config(guild_id)
+        config = await config_manager.get_guild_config(guild_id)
         allowed_channels = config.get('allowed_search_channels', [])
 
         current_channel_id = interaction_or_ctx.channel.id
@@ -370,7 +376,7 @@ async def perform_search(interaction_or_ctx, query, user):
 
         if not allowed_channels:
              # Check if we should warn
-             if is_admin_or_mod(interaction_or_ctx):
+             if await is_admin_or_mod(interaction_or_ctx):
                  # Admin running in unconfigured server -> Allow? Or Warn?
                  # Better to block and tell them to setup.
                  pass
@@ -515,10 +521,10 @@ class SetupWizard:
         # Save owner role (using add_mod_roles logic for now as owner implies mod)
         # Assuming we just treat owner role as a super-mod or store separate if config supports
         # Config manager currently has 'mod_roles'. Let's add it there for permission consistency
-        config_manager.add_to_list(self.guild.id, 'mod_roles', int(role_id))
+        await config_manager.add_to_list(self.guild.id, 'mod_roles', int(role_id))
 
         # Also store explicitly if needed, but config_manager generic update works
-        config_manager.update_guild_config(self.guild.id, 'owner_role_id', int(role_id))
+        await config_manager.update_guild_config(self.guild.id, 'owner_role_id', int(role_id))
 
         await interaction.edit_original_response(content=f"Owner Role set to <@&{role_id}>.", view=None)
         await self.ask_mod_role()
@@ -532,7 +538,7 @@ class SetupWizard:
 
     async def set_mod_role(self, interaction: discord.Interaction, role_id):
         await interaction.response.defer()
-        config_manager.add_to_list(self.guild.id, 'mod_roles', int(role_id))
+        await config_manager.add_to_list(self.guild.id, 'mod_roles', int(role_id))
         await interaction.edit_original_response(content=f"Moderator Role set to <@&{role_id}>.", view=None)
         await self.ask_create_channels()
 
@@ -552,8 +558,8 @@ class SetupWizard:
                 req = await self.guild.create_text_channel("game-requests", category=cat)
                 forum = await self.guild.create_forum_channel("Game Threads", category=cat)
 
-                config_manager.update_guild_config(self.guild.id, 'forum_channel_id', forum.id)
-                config_manager.add_to_list(self.guild.id, 'allowed_search_channels', req.id)
+                await config_manager.update_guild_config(self.guild.id, 'forum_channel_id', forum.id)
+                await config_manager.add_to_list(self.guild.id, 'allowed_search_channels', req.id)
 
                 await self.ctx.send(f"Created {req.mention} and {forum.mention}.")
             except Exception as e:
@@ -571,7 +577,7 @@ class SetupWizard:
         if view.value:
             try:
                 # Get Configured Roles for permissions
-                config = config_manager.get_guild_config(self.guild.id)
+                config = await config_manager.get_guild_config(self.guild.id)
                 mod_roles = config.get('mod_roles', [])
                 owner_role_id = config.get('owner_role_id')
 
@@ -588,7 +594,7 @@ class SetupWizard:
                 cat = discord.utils.get(self.guild.categories, name="Game Bot")
                 log_chan = await self.guild.create_text_channel("bot-logs", category=cat, overwrites=overwrites)
 
-                config_manager.update_guild_config(self.guild.id, 'log_channel_id', log_chan.id)
+                await config_manager.update_guild_config(self.guild.id, 'log_channel_id', log_chan.id)
                 await self.ctx.send(f"Created private log channel: {log_chan.mention}")
             except Exception as e:
                 await self.ctx.send(f"Failed to create log channel: {e}")
@@ -618,58 +624,58 @@ class ConfigGroup(commands.GroupCog, name="config"):
         self.bot = bot
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if is_admin_or_mod(interaction):
+        if await is_admin_or_mod(interaction):
             return True
         await interaction.response.send_message("You do not have permission to use config commands.", ephemeral=True)
         return False
 
     @discord.app_commands.command(name="allow", description="Allow searching in a text channel")
     async def allow(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        config_manager.add_to_list(interaction.guild_id, 'allowed_search_channels', channel.id)
+        await config_manager.add_to_list(interaction.guild_id, 'allowed_search_channels', channel.id)
         await interaction.response.send_message(f"Added {channel.mention} to allowed search channels.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} allowed search in {channel.mention}.")
 
     @discord.app_commands.command(name="deny", description="Disallow searching in a text channel")
     async def deny(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        config_manager.remove_from_list(interaction.guild_id, 'allowed_search_channels', channel.id)
+        await config_manager.remove_from_list(interaction.guild_id, 'allowed_search_channels', channel.id)
         await interaction.response.send_message(f"Removed {channel.mention} from allowed search channels.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} disallowed search in {channel.mention}.")
 
     @discord.app_commands.command(name="forum", description="Set the forum channel for game threads")
     async def forum(self, interaction: discord.Interaction, channel: discord.ForumChannel):
-        config_manager.update_guild_config(interaction.guild_id, 'forum_channel_id', channel.id)
+        await config_manager.update_guild_config(interaction.guild_id, 'forum_channel_id', channel.id)
         await interaction.response.send_message(f"Forum channel set to {channel.mention}.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} set Forum Channel to {channel.mention}.")
 
     @discord.app_commands.command(name="logs", description="Set the log channel for bot errors")
     async def logs(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        config_manager.update_guild_config(interaction.guild_id, 'log_channel_id', channel.id)
+        await config_manager.update_guild_config(interaction.guild_id, 'log_channel_id', channel.id)
         await interaction.response.send_message(f"Log channel set to {channel.mention}.", ephemeral=True)
         # Log to the new channel
         await log_audit(interaction.guild, f"{interaction.user.mention} set Log Channel to {channel.mention}.")
 
     @discord.app_commands.command(name="add_mod", description="Add a role that can manage bot config")
     async def add_mod(self, interaction: discord.Interaction, role: discord.Role):
-        config_manager.add_to_list(interaction.guild_id, 'mod_roles', role.id)
+        await config_manager.add_to_list(interaction.guild_id, 'mod_roles', role.id)
         await interaction.response.send_message(f"Added {role.mention} as a moderator role.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} added Mod Role {role.mention}.")
 
     @discord.app_commands.command(name="remove_mod", description="Remove a moderator role")
     async def remove_mod(self, interaction: discord.Interaction, role: discord.Role):
-        config_manager.remove_from_list(interaction.guild_id, 'mod_roles', role.id)
+        await config_manager.remove_from_list(interaction.guild_id, 'mod_roles', role.id)
         await interaction.response.send_message(f"Removed {role.mention} from moderator roles.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} removed Mod Role {role.mention}.")
 
     @discord.app_commands.command(name="muted_role", description="Set the role to use for muting users")
     async def muted_role(self, interaction: discord.Interaction, role: discord.Role):
-        config_manager.update_guild_config(interaction.guild_id, 'muted_role_id', role.id)
+        await config_manager.update_guild_config(interaction.guild_id, 'muted_role_id', role.id)
         await interaction.response.send_message(f"Muted role set to {role.mention}.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} set Muted Role to {role.mention}.")
 
     @discord.app_commands.command(name="create_mute", description="Create a new Muted role with permissions")
     async def create_mute(self, interaction: discord.Interaction):
         # Check if already configured
-        config = config_manager.get_guild_config(interaction.guild_id)
+        config = await config_manager.get_guild_config(interaction.guild_id)
         existing_id = config.get('muted_role_id')
 
         if existing_id:
@@ -677,11 +683,6 @@ class ConfigGroup(commands.GroupCog, name="config"):
             role = interaction.guild.get_role(existing_id)
             if role:
                  # Prompt user
-                 view = YesNoView(interaction) # YesNoView expects ctx in __init__?
-                 # Wait, YesNoView is defined above: __init__(self, ctx). It uses ctx.author.
-                 # We need to adapt it or create a new one for Interaction.
-                 # Let's create a quick inline view or modify YesNoView to handle interaction.user
-
                  class RemoveConfigView(discord.ui.View):
                      def __init__(self, original_interaction):
                          super().__init__(timeout=60)
@@ -713,7 +714,7 @@ class ConfigGroup(commands.GroupCog, name="config"):
                  await view.wait()
 
                  if view.value:
-                     config_manager.update_guild_config(interaction.guild_id, 'muted_role_id', None)
+                     await config_manager.update_guild_config(interaction.guild_id, 'muted_role_id', None)
                      await interaction.edit_original_response(content=f"Configuration removed. {role.mention} is no longer the tracked Muted role.", view=None)
                      await log_audit(interaction.guild, f"{interaction.user.mention} removed Muted Role configuration.")
                  else:
@@ -751,7 +752,7 @@ class ConfigGroup(commands.GroupCog, name="config"):
                     pass
 
             # Save Config
-            config_manager.update_guild_config(guild.id, 'muted_role_id', muted_role.id)
+            await config_manager.update_guild_config(guild.id, 'muted_role_id', muted_role.id)
 
             await interaction.followup.send(f"Created {muted_role.mention} and applied overwrites to {count} channels.", ephemeral=True)
             await log_audit(guild, f"{interaction.user.mention} created new Muted Role {muted_role.mention}.")
@@ -761,7 +762,7 @@ class ConfigGroup(commands.GroupCog, name="config"):
 
     @discord.app_commands.command(name="list", description="List current configuration")
     async def list_config(self, interaction: discord.Interaction):
-        config = config_manager.get_guild_config(interaction.guild_id)
+        config = await config_manager.get_guild_config(interaction.guild_id)
 
         # Helper to format lists
         def fmt_channels(ids):
@@ -955,7 +956,7 @@ class Moderation(commands.Cog):
         self.bot = bot
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if is_admin_or_mod(interaction):
+        if await is_admin_or_mod(interaction):
             return True
         await interaction.response.send_message("You do not have permission to use moderation commands.", ephemeral=True)
         return False
@@ -984,7 +985,7 @@ class Moderation(commands.Cog):
 
     @discord.app_commands.command(name="mute", description="Mute a user")
     async def mute(self, interaction: discord.Interaction, user: discord.Member, reason: str = "No reason provided"):
-        config = config_manager.get_guild_config(interaction.guild_id)
+        config = await config_manager.get_guild_config(interaction.guild_id)
         muted_role_id = config.get('muted_role_id')
 
         if not muted_role_id:
@@ -1007,7 +1008,7 @@ class Moderation(commands.Cog):
 
     @discord.app_commands.command(name="unmute", description="Unmute a user")
     async def unmute(self, interaction: discord.Interaction, user: discord.Member):
-        config = config_manager.get_guild_config(interaction.guild_id)
+        config = await config_manager.get_guild_config(interaction.guild_id)
         muted_role_id = config.get('muted_role_id')
 
         if not muted_role_id:
@@ -1037,7 +1038,7 @@ class Fun(commands.Cog):
         self.bot = bot
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if is_admin_or_mod(interaction):
+        if await is_admin_or_mod(interaction):
             return True
         await interaction.response.send_message("You do not have permission to use fun commands.", ephemeral=True)
         return False
@@ -1128,11 +1129,25 @@ class GameSearch(commands.Cog):
         # Delegate to helper
         await perform_search(ctx, query, ctx.author)
 
+from tracking import Tracking
+from leveling import Leveling
+from economy import Economy
+from birthdays import Birthdays
+
 async def setup_cogs():
     await bot.add_cog(ConfigGroup(bot))
+    # Moderation is now part of Tracking/Advanced Mod, but old Moderation cog exists.
+    # We should merge or replace. The new Tracking cog has 'warn' and 'tempmute'.
+    # Old Moderation had 'kick', 'ban', 'mute', 'unmute'.
+    # I will keep old Moderation for now, and Tracking adds the new ones.
     await bot.add_cog(Moderation(bot))
     await bot.add_cog(Fun(bot))
     await bot.add_cog(GameSearch(bot))
+
+    await bot.add_cog(Tracking(bot))
+    await bot.add_cog(Leveling(bot))
+    await bot.add_cog(Economy(bot))
+    await bot.add_cog(Birthdays(bot))
 
 @bot.hybrid_command(name="showcommands", description="Show all available commands")
 async def show_commands(ctx: commands.Context):
@@ -1196,35 +1211,32 @@ async def show_commands(ctx: commands.Context):
 @discord.app_commands.describe(amount="Number of messages to clear (default 10)")
 async def clear(ctx: commands.Context, amount: int = 10):
     # Check permissions using helper
-    if not is_admin_or_mod(ctx if hasattr(ctx, 'permissions') else ctx.interaction): # Hacky context check
-         # Actually just check manually since clear might be strict owner
-         pass
+    # The helper handles Context vs Interaction internally now
+    if not await is_admin_or_mod(ctx):
+         await ctx.send("You do not have permission to use this command.", ephemeral=True)
+         return
 
-    # Use old OWNER check for clear command specifically as requested in original prompt?
-    # User said "other commands should be allowed anywhere. And yes, there should be a permission for not only owner, but moderators"
-    # So clear should check is_admin_or_mod.
+    # Delete the command message itself if possible
+    if not ctx.interaction:
+        try:
+            await ctx.message.delete()
+        except:
+            pass
 
-    if not is_admin_or_mod(ctx.interaction if ctx.interaction else ctx): # ctx matches interaction interface mostly
-         # Wait, context doesn't have permissions attribute the same way always.
-         # Let's use the helper properly.
-         # Actually, for hybrid commands, ctx is Context.
-         # Helper takes interaction.
-         # Let's rebuild permission check inline for context.
-         is_auth = False
-         if ctx.author.guild_permissions.administrator: is_auth = True
-         if not is_auth:
-             config = config_manager.get_guild_config(ctx.guild.id)
-             for r in ctx.author.roles:
-                 if r.id in config.get('mod_roles', []):
-                     is_auth = True
-                     break
-         if not is_auth and OWNER_ROLE_ID: # Legacy
-             # Simplified check
-             pass
+    # Perform purge
+    try:
+        deleted = await ctx.channel.purge(limit=amount)
+        msg = await ctx.send(f"Deleted {len(deleted)} messages.", ephemeral=True)
+        await log_audit(ctx.guild, f"{ctx.author.mention} cleared {len(deleted)} messages in {ctx.channel.mention}.")
 
-         if not is_auth:
-             await ctx.send("You do not have permission to use this command.", ephemeral=True)
-             return
+        if not ctx.interaction:
+            await asyncio.sleep(3)
+            await msg.delete()
+
+    except discord.Forbidden:
+        await ctx.send("I do not have permission to manage messages.", ephemeral=True)
+    except Exception as e:
+        await ctx.send(f"Failed to clear messages: {e}", ephemeral=True)
 
     # Delete the command message itself if possible
     if not ctx.interaction:
