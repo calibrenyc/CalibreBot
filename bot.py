@@ -15,7 +15,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.0.2"
+BOT_VERSION = "2.0.6"
 
 # Setup Bot
 class MyBot(commands.Bot):
@@ -874,11 +874,45 @@ async def update_bot(ctx):
             output = "Repository initialized and reset to origin/main."
 
         elif code != 0:
-            if "authentication failed" in error.lower():
+            # Handle Conflicts (Local files vs Repo files)
+            if "untracked working tree files" in error.lower() or "local changes" in error.lower():
+                await ctx.send("⚠️ Local file conflict detected. Forcing update while preserving config...")
+
+                # 1. Backup Guild Config
+                config_content = None
+                if os.path.exists("guild_configs.json"):
+                    try:
+                        with open("guild_configs.json", "r", encoding='utf-8') as f:
+                            config_content = f.read()
+                    except Exception as e:
+                        await ctx.send(f"Failed to backup config: {e}")
+                        return
+
+                # 2. Force Reset
+                # We need to fetch first to ensure we have the target
+                await run_cmd(f"git fetch {repo_url}")
+                reset_code, reset_out, reset_err = await run_cmd("git reset --hard origin/main")
+
+                if reset_code != 0:
+                    await ctx.send(f"Force reset failed:\n```\n{reset_err}\n```")
+                    return
+
+                # 3. Restore Config
+                if config_content:
+                    try:
+                        with open("guild_configs.json", "w", encoding='utf-8') as f:
+                            f.write(config_content)
+                    except Exception as e:
+                        await ctx.send(f"Failed to restore config! Check backups if available. Error: {e}")
+
+                output = "Forced update complete. Config restored."
+
+            elif "authentication failed" in error.lower():
                 await ctx.send(f"❌ Authentication Failed. Please check your `GITHUB_TOKEN` in `.env`.\nError: `{error}`")
+                return
             else:
                 await ctx.send(f"Update failed:\n```\n{error}\n```")
-            return
+                return
 
         if "Already up to date" in output:
             await ctx.send("Bot is already up to date.")
