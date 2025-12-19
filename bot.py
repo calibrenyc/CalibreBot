@@ -16,7 +16,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.1.1"
+BOT_VERSION = "2.1.3"
 
 # Setup Bot
 class MyBot(commands.Bot):
@@ -1174,26 +1174,28 @@ class HelpSelect(Select):
         cmds = []
         if val == "Game Search":
             cog = self.bot.get_cog("GameSearch")
-            if cog: cmds = [c for c in cog.walk_app_commands()]
+            # Use get_commands() for standard Cogs with hybrid commands
+            if cog: cmds = [c for c in cog.get_commands()]
         elif val == "Moderation & Tracking":
             # Combine Tracking (new mod) and Moderation (old mod)
             cog1 = self.bot.get_cog("Tracking")
             cog2 = self.bot.get_cog("Moderation")
-            if cog1: cmds.extend([c for c in cog1.walk_app_commands()])
-            if cog2: cmds.extend([c for c in cog2.walk_app_commands()])
+            if cog1: cmds.extend([c for c in cog1.get_commands()])
+            if cog2: cmds.extend([c for c in cog2.get_commands()])
         elif val == "Leveling":
             cog = self.bot.get_cog("Leveling")
-            if cog: cmds = [c for c in cog.walk_app_commands()]
+            if cog: cmds = [c for c in cog.get_commands()]
         elif val == "Economy":
             cog = self.bot.get_cog("Economy")
-            if cog: cmds = [c for c in cog.walk_app_commands()]
+            if cog: cmds = [c for c in cog.get_commands()]
         elif val == "Fun & Misc":
             cog1 = self.bot.get_cog("Fun")
             cog2 = self.bot.get_cog("Birthdays")
-            if cog1: cmds.extend([c for c in cog1.walk_app_commands()])
-            if cog2: cmds.extend([c for c in cog2.walk_app_commands()])
+            if cog1: cmds.extend([c for c in cog1.get_commands()])
+            if cog2: cmds.extend([c for c in cog2.get_commands()])
         elif val == "Configuration":
             cog = self.bot.get_cog("config")
+            # Config is a GroupCog, so we use walk_app_commands
             if cog: cmds = [c for c in cog.walk_app_commands()]
             # Add manual commands
             embed.add_field(name="/setup", value="Run the interactive setup wizard.", inline=False)
