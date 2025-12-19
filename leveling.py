@@ -74,12 +74,8 @@ class Leveling(commands.Cog):
                 async with db.execute("SELECT bg_url, card_color FROM global_users WHERE user_id = ?", (user.id,)) as cursor:
                     profile = await cursor.fetchone()
                     if profile and profile['card_color']:
-                        # Convert hex to rgb
-                        h = profile['card_color'].lstrip('#')
                         try:
-                            # bg_color = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-                            # Wait, the prompt says "customize card... background and color".
-                            # Let's treat "card_color" as accent or bar color, and background as BG.
+                            # Use card_color as accent/bar color if valid hex?
                             pass
                         except: pass
 
@@ -101,19 +97,19 @@ class Leveling(commands.Cog):
             image.paste(avatar, (35, 35), mask=mask)
 
             # Text
-            # We need a font. Pillow default is tiny.
-            # Usually we download a font or use system.
-            # Fallback to default for safety if ttf not found.
             try:
-                font_large = ImageFont.truetype("arial.ttf", 60)
-                font_small = ImageFont.truetype("arial.ttf", 30)
+                # Use larger fonts as requested
+                font_large = ImageFont.truetype("arial.ttf", 80)
+                font_medium = ImageFont.truetype("arial.ttf", 50)
+                font_small = ImageFont.truetype("arial.ttf", 40)
             except:
                 font_large = ImageFont.load_default()
+                font_medium = ImageFont.load_default()
                 font_small = ImageFont.load_default()
 
-            draw.text((250, 50), str(user), font=font_large, fill=text_color)
-            draw.text((250, 130), f"Level: {level} | Rank: #{rank_pos}", font=font_small, fill=text_color)
-            draw.text((250, 170), f"XP: {xp}", font=font_small, fill=text_color)
+            draw.text((250, 40), str(user.name), font=font_large, fill=text_color)
+            draw.text((250, 120), f"Level: {level} | Rank: #{rank_pos}", font=font_medium, fill=text_color)
+            draw.text((250, 175), f"XP: {xp}", font=font_small, fill=text_color)
 
             # Progress Bar
             next_level_xp = (level + 1) * 100
@@ -122,7 +118,7 @@ class Leveling(commands.Cog):
             current_progress = xp - current_level_base
             percent = max(0, min(1, current_progress / needed)) if needed > 0 else 0
 
-            bar_x, bar_y, bar_w, bar_h = 250, 200, 600, 20
+            bar_x, bar_y, bar_w, bar_h = 250, 210, 600, 25
             draw.rectangle((bar_x, bar_y, bar_x + bar_w, bar_y + bar_h), fill=(70, 70, 70)) # Background
             draw.rectangle((bar_x, bar_y, bar_x + int(bar_w * percent), bar_y + bar_h), fill=(114, 137, 218)) # Fill
 
@@ -136,19 +132,20 @@ class Leveling(commands.Cog):
         except Exception as e:
             await ctx.send(f"Failed to generate rank card: {e}")
 
-    @commands.group(name="settings", invoke_without_command=True)
+    # Explicitly hybrid group for slash support
+    @commands.hybrid_group(name="settings", description="Configure your rank card")
     async def settings(self, ctx):
-        await ctx.send("Use `/settings background <url>` or `/settings color <hex>`")
+        if ctx.invoked_subcommand is None:
+            await ctx.send("Use `/settings background <url>` or `/settings color <hex>`")
 
-    @settings.command(name="background")
+    @settings.command(name="background", description="Set your rank card background URL")
     async def set_background(self, ctx, url: str):
-        # Validate URL logic omitted for brevity
         async with aiosqlite.connect("bot_data.db") as db:
              await db.execute("INSERT INTO global_users (user_id, bg_url) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET bg_url = ?", (ctx.author.id, url, url))
              await db.commit()
         await ctx.send("Background updated!")
 
-    @settings.command(name="color")
+    @settings.command(name="color", description="Set your rank card accent color (Hex)")
     async def set_color(self, ctx, hex_val: str):
         async with aiosqlite.connect("bot_data.db") as db:
              await db.execute("INSERT INTO global_users (user_id, card_color) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET card_color = ?", (ctx.author.id, hex_val, hex_val))

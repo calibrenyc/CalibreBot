@@ -16,7 +16,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.1.0"
+BOT_VERSION = "2.1.1"
 
 # Setup Bot
 class MyBot(commands.Bot):
@@ -1149,63 +1149,80 @@ async def setup_cogs():
     await bot.add_cog(Economy(bot))
     await bot.add_cog(Birthdays(bot))
 
-@bot.hybrid_command(name="showcommands", description="Show all available commands")
+class HelpSelect(Select):
+    def __init__(self, bot, ctx):
+        self.bot = bot
+        self.ctx = ctx
+        options = [
+            discord.SelectOption(label="Game Search", emoji="🎮", description="Search games and repacks"),
+            discord.SelectOption(label="Moderation & Tracking", emoji="🛡️", description="Kick, Ban, Mute, Logs"),
+            discord.SelectOption(label="Leveling", emoji="📈", description="Rank cards and XP"),
+            discord.SelectOption(label="Economy", emoji="💰", description="Daily, Shop, Gambling"),
+            discord.SelectOption(label="Fun & Misc", emoji="🎉", description="Random Move, Birthdays"),
+            discord.SelectOption(label="Configuration", emoji="⚙️", description="Setup and Settings"),
+        ]
+        super().__init__(placeholder="Select a category...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user != self.ctx.author:
+            return await interaction.response.send_message("This menu is not for you.", ephemeral=True)
+
+        val = self.values[0]
+        embed = discord.Embed(title=f"{val} Commands", color=discord.Color.blue())
+
+        cmds = []
+        if val == "Game Search":
+            cog = self.bot.get_cog("GameSearch")
+            if cog: cmds = [c for c in cog.walk_app_commands()]
+        elif val == "Moderation & Tracking":
+            # Combine Tracking (new mod) and Moderation (old mod)
+            cog1 = self.bot.get_cog("Tracking")
+            cog2 = self.bot.get_cog("Moderation")
+            if cog1: cmds.extend([c for c in cog1.walk_app_commands()])
+            if cog2: cmds.extend([c for c in cog2.walk_app_commands()])
+        elif val == "Leveling":
+            cog = self.bot.get_cog("Leveling")
+            if cog: cmds = [c for c in cog.walk_app_commands()]
+        elif val == "Economy":
+            cog = self.bot.get_cog("Economy")
+            if cog: cmds = [c for c in cog.walk_app_commands()]
+        elif val == "Fun & Misc":
+            cog1 = self.bot.get_cog("Fun")
+            cog2 = self.bot.get_cog("Birthdays")
+            if cog1: cmds.extend([c for c in cog1.walk_app_commands()])
+            if cog2: cmds.extend([c for c in cog2.walk_app_commands()])
+        elif val == "Configuration":
+            cog = self.bot.get_cog("config")
+            if cog: cmds = [c for c in cog.walk_app_commands()]
+            # Add manual commands
+            embed.add_field(name="/setup", value="Run the interactive setup wizard.", inline=False)
+            embed.add_field(name="@Bot update", value="Update the bot code.", inline=False)
+
+        for cmd in cmds:
+            desc = cmd.description if cmd.description else "No description"
+            embed.add_field(name=f"/{cmd.name}", value=desc, inline=False)
+
+        await interaction.response.edit_message(embed=embed, view=self.view)
+
+class HelpView(View):
+    def __init__(self, bot, ctx):
+        super().__init__(timeout=120)
+        self.add_item(HelpSelect(bot, ctx))
+
+@bot.hybrid_command(name="help", description="Interactive command menu")
+async def help_command(ctx: commands.Context):
+    embed = discord.Embed(
+        title="🤖 Calibre Bot Help",
+        description="Select a category from the dropdown below to view commands.",
+        color=discord.Color.brand_green()
+    )
+    view = HelpView(bot, ctx)
+    await ctx.send(embed=embed, view=view)
+
+# Alias for backward compatibility
+@bot.hybrid_command(name="showcommands", description="Alias for /help")
 async def show_commands(ctx: commands.Context):
-    embed = discord.Embed(title="Bot Commands Help", color=discord.Color.blue())
-
-    # 0. Game Search Commands
-    search_cmds = []
-    search_cog = bot.get_cog("GameSearch")
-    if search_cog:
-        for cmd in search_cog.walk_app_commands():
-            search_cmds.append(f"`/{cmd.name}`: {cmd.description}")
-
-    if search_cmds:
-        embed.add_field(name="Game Search", value="\n".join(search_cmds), inline=False)
-
-    # 1. Config Commands
-    config_cmds = []
-    config_cog = bot.get_cog("config")
-    if config_cog:
-        for cmd in config_cog.walk_app_commands():
-            config_cmds.append(f"`/{cmd.name}`: {cmd.description}")
-
-    if config_cmds:
-        embed.add_field(name="Configuration (Admin/Mod)", value="\n".join(config_cmds), inline=False)
-
-    # 2. Moderation Commands
-    mod_cmds = []
-    mod_cog = bot.get_cog("Moderation")
-    if mod_cog:
-        for cmd in mod_cog.walk_app_commands():
-            mod_cmds.append(f"`/{cmd.name}`: {cmd.description}")
-
-    if mod_cmds:
-        embed.add_field(name="Moderation", value="\n".join(mod_cmds), inline=False)
-
-    # 3. Fun Commands
-    fun_cmds = []
-    fun_cog = bot.get_cog("Fun")
-    if fun_cog:
-        for cmd in fun_cog.walk_app_commands():
-            fun_cmds.append(f"`/{cmd.name}`: {cmd.description}")
-
-    if fun_cmds:
-        embed.add_field(name="Fun", value="\n".join(fun_cmds), inline=False)
-
-    # 4. General/Global Commands
-    # We moved search, so only clear and setup remain
-    general_cmds = [
-        "`/clear <amount>`: Clear messages.",
-        "`/setup`: Run the interactive setup wizard."
-    ]
-    embed.add_field(name="General", value="\n".join(general_cmds), inline=False)
-
-    # Send
-    if ctx.interaction:
-        await ctx.send(embed=embed, ephemeral=True)
-    else:
-        await ctx.send(embed=embed)
+    await help_command(ctx)
 
 @bot.hybrid_command(name="clear", description="Clear the last 10 messages (Owner Role only)")
 @discord.app_commands.describe(amount="Number of messages to clear (default 10)")
