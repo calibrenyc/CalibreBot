@@ -58,6 +58,42 @@ class Economy(commands.Cog):
         embed = discord.Embed(title=f"{user.display_name}'s Balance", description=f"💰 {bal} coins", color=discord.Color.green())
         await ctx.send(embed=embed)
 
+    @commands.hybrid_command(name="moneyleaderboard", description="Show top 5 richest members")
+    async def money_leaderboard(self, ctx):
+        # 1. Get all member IDs in this guild
+        member_ids = [m.id for m in ctx.guild.members if not m.bot]
+        if not member_ids:
+            return await ctx.send("No members found.", ephemeral=True)
+
+        # 2. Chunking (batch size 500)
+        chunks = [member_ids[i:i + 500] for i in range(0, len(member_ids), 500)]
+        all_rows = []
+
+        async with aiosqlite.connect("bot_data.db") as db:
+            for chunk in chunks:
+                placeholders = ",".join("?" for _ in chunk)
+                query = f"SELECT user_id, balance FROM global_users WHERE user_id IN ({placeholders}) AND balance > 0"
+                async with db.execute(query, tuple(chunk)) as cursor:
+                    rows = await cursor.fetchall()
+                    all_rows.extend(rows)
+
+        # 3. Sort and limit
+        # all_rows is list of (user_id, balance) tuples
+        all_rows.sort(key=lambda x: x[1], reverse=True)
+        top_5 = all_rows[:5]
+
+        if not top_5:
+            return await ctx.send("No one has any money yet!", ephemeral=True)
+
+        embed = discord.Embed(title=f"💰 {ctx.guild.name} Richest Members", color=discord.Color.gold())
+
+        for idx, (uid, bal) in enumerate(top_5, start=1):
+            member = ctx.guild.get_member(uid)
+            name = member.display_name if member else f"User {uid}"
+            embed.add_field(name=f"#{idx} {name}", value=f"{bal} coins", inline=False)
+
+        await ctx.send(embed=embed)
+
     @commands.hybrid_group(name="gamble", description="Gambling games")
     async def gamble(self, ctx):
         pass

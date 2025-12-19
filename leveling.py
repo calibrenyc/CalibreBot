@@ -509,3 +509,33 @@ class Leveling(commands.Cog):
 
         view = RankSettingsView(self)
         await ctx.send(embed=embed, view=view)
+
+    @commands.hybrid_command(name="leaderboard", description="Show top 5 active members")
+    async def leaderboard(self, ctx):
+        guild_id = ctx.guild.id
+        async with aiosqlite.connect("bot_data.db") as db:
+            async with db.execute("""
+                SELECT user_id, xp, level FROM user_levels
+                WHERE guild_id = ?
+                ORDER BY xp DESC LIMIT 5
+            """, (guild_id,)) as cursor:
+                rows = await cursor.fetchall()
+
+        if not rows:
+            return await ctx.send("No ranked users yet.", ephemeral=True)
+
+        embed = discord.Embed(title=f"📊 {ctx.guild.name} Leaderboard", color=discord.Color.gold())
+
+        for idx, row in enumerate(rows, start=1):
+            user_id, xp, level = row
+            # Fetch user object (try cache first)
+            member = ctx.guild.get_member(user_id)
+            name = member.display_name if member else f"User {user_id}"
+
+            embed.add_field(
+                name=f"#{idx} {name}",
+                value=f"Level {level} • {xp} XP",
+                inline=False
+            )
+
+        await ctx.send(embed=embed)
