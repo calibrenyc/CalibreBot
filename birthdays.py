@@ -14,9 +14,9 @@ class Birthdays(commands.Cog):
 
     @birthday.command(name="set")
     async def birthday_set(self, ctx, date: str):
-        """Format: DD/MM (e.g. 25/12)"""
+        """Format: MM/DD (e.g. 12/25)"""
         try:
-            d = datetime.datetime.strptime(date, "%d/%m")
+            d = datetime.datetime.strptime(date, "%m/%d")
             day = d.day
             month = d.month
 
@@ -27,9 +27,9 @@ class Birthdays(commands.Cog):
                 """, (ctx.author.id, day, month, day, month))
                 await db.commit()
 
-            await ctx.send(f"Birthday set to {date}!")
+            await ctx.send(f"Birthday set to {date} (Month/Day)!")
         except ValueError:
-            await ctx.send("Invalid format. Use DD/MM.")
+            await ctx.send("Invalid format. Use MM/DD.")
 
     @tasks.loop(hours=24)
     async def check_birthdays(self):
