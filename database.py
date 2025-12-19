@@ -11,7 +11,7 @@ class DatabaseManager:
 
     async def init_db(self):
         async with aiosqlite.connect(self.db_file) as db:
-            # 1. Guild Configs (Replaces JSON)
+            # 1. Guild Configs
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS guild_configs (
                     guild_id INTEGER PRIMARY KEY,
@@ -24,7 +24,7 @@ class DatabaseManager:
                 )
             """)
 
-            # 2. Flagged Words (Per Guild)
+            # 2. Flagged Words
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS flagged_words (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +34,7 @@ class DatabaseManager:
                 )
             """)
 
-            # 3. Warnings (Moderation)
+            # 3. Warnings
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS warnings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +46,7 @@ class DatabaseManager:
                 )
             """)
 
-            # 4. Leveling (Per Guild)
+            # 4. Leveling
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS user_levels (
                     guild_id INTEGER,
@@ -58,7 +58,7 @@ class DatabaseManager:
                 )
             """)
 
-            # 5. Global Economy / Profile (Global)
+            # 5. Global Economy / Profile
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS global_users (
                     user_id INTEGER PRIMARY KEY,
@@ -69,10 +69,22 @@ class DatabaseManager:
                 )
             """)
 
-            # 6. Shop Items (Per Guild? Or Global? Prompt says "create your own currency... items... in your Discord server".
-            # Implies per-server items (paid roles are definitely per server).
-            # But currency is global.
-            # Let's make Shop Items Per Guild.
+            # --- Schema Updates for Rank Cards (v1.1) ---
+            # SQLite doesn't support IF NOT EXISTS for ADD COLUMN easily.
+            # We check pragma or catch duplicate column error.
+            try:
+                await db.execute("ALTER TABLE global_users ADD COLUMN card_bg_color TEXT DEFAULT '#2C2F33'")
+            except Exception: pass
+
+            try:
+                await db.execute("ALTER TABLE global_users ADD COLUMN card_opacity REAL DEFAULT 0.5")
+            except Exception: pass
+
+            try:
+                await db.execute("ALTER TABLE global_users ADD COLUMN card_font TEXT DEFAULT 'default'")
+            except Exception: pass
+
+            # 6. Shop Items
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS shop_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,11 +96,7 @@ class DatabaseManager:
                 )
             """)
 
-            # 7. Inventory (Global? Or Per Server? If items are roles, inventory is just "instant use" usually).
-            # If items are roles, we don't store them in inventory, we just give the role.
-            # But "items" could be other things. For now, we'll implement simple role-buy system.
-
-            # 8. Active Bets (Per Guild)
+            # 8. Active Bets
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS active_bets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,9 +120,7 @@ class DatabaseManager:
                 )
             """)
 
-            # 9. Birthdays (Per Guild? Usually Global user data, but announced per guild?)
-            # Prompt: "Discord birthday notification, alert everyone when it's someones birthday."
-            # Usually users set it once globally.
+            # 9. Birthdays
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS birthdays (
                     user_id INTEGER PRIMARY KEY,
@@ -152,7 +158,6 @@ class DatabaseManager:
 
                 await db.commit()
 
-            # Rename old file
             os.rename("guild_configs.json", "guild_configs.json.bak")
             print("Migration complete. Renamed JSON to .bak")
 
@@ -170,13 +175,11 @@ class DatabaseManager:
                 return {}
 
     async def update_guild_config(self, guild_id, key, value):
-        # Allow dynamic updates. Note: Safe only if key is valid column.
         valid_columns = ['owner_role_id', 'forum_channel_id', 'log_channel_id', 'muted_role_id', 'allowed_search_channels', 'mod_roles']
         if key not in valid_columns:
             return False
 
         async with aiosqlite.connect(self.db_file) as db:
-            # Check if exists
             async with db.execute("SELECT 1 FROM guild_configs WHERE guild_id = ?", (guild_id,)) as cursor:
                 exists = await cursor.fetchone()
 
@@ -189,5 +192,32 @@ class DatabaseManager:
             await db.execute(f"UPDATE guild_configs SET {key} = ? WHERE guild_id = ?", (value, guild_id))
             await db.commit()
         return True
+
+    # Helper for generic adding to lists (used by legacy code)
+    async def add_to_list(self, guild_id, key, item):
+        config = await self.get_guild_config(guild_id)
+        current_list = []
+        if config.get(key):
+            try:
+                current_list = json.loads(config[key])
+            except:
+                pass
+
+        if item not in current_list:
+            current_list.append(item)
+            await self.update_guild_config(guild_id, key, current_list)
+
+    async def remove_from_list(self, guild_id, key, item):
+        config = await self.get_guild_config(guild_id)
+        current_list = []
+        if config.get(key):
+            try:
+                current_list = json.loads(config[key])
+            except:
+                pass
+
+        if item in current_list:
+            current_list.remove(item)
+            await self.update_guild_config(guild_id, key, current_list)
 
 db_manager = DatabaseManager()
