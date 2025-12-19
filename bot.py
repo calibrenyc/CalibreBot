@@ -27,7 +27,8 @@ class MyBot(commands.Bot):
         intents.voice_states = True # Required for Voice tracking
 
         # Prefix '!' OR mentioning the bot
-        super().__init__(command_prefix=commands.when_mentioned_or("!"), intents=intents)
+        # Disable default help to allow custom help command
+        super().__init__(command_prefix=commands.when_mentioned_or("!"), intents=intents, help_command=None)
 
     async def setup_hook(self):
         # Initialize DB
