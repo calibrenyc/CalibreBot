@@ -58,11 +58,11 @@ class Economy(commands.Cog):
         embed = discord.Embed(title=f"{user.display_name}'s Balance", description=f"💰 {bal} coins", color=discord.Color.green())
         await ctx.send(embed=embed)
 
-    @commands.hybrid_group(name="gamble")
+    @commands.hybrid_group(name="gamble", description="Gambling games")
     async def gamble(self, ctx):
         pass
 
-    @gamble.command(name="rps")
+    @gamble.command(name="rps", description="Play Rock-Paper-Scissors for coins")
     async def rps(self, ctx, amount: int, choice: str):
         bal = await self.get_balance(ctx.author.id)
         if bal < amount: return await ctx.send("Insufficient funds.")
@@ -94,11 +94,11 @@ class Economy(commands.Cog):
         await ctx.send(msg)
 
     # --- Shop ---
-    @commands.hybrid_group(name="shop")
+    @commands.hybrid_group(name="shop", description="Server shop system")
     async def shop(self, ctx):
         pass
 
-    @shop.command(name="list")
+    @shop.command(name="list", description="List available items in the shop")
     async def shop_list(self, ctx):
         async with aiosqlite.connect("bot_data.db") as db:
             db.row_factory = aiosqlite.Row
@@ -114,7 +114,7 @@ class Economy(commands.Cog):
             embed.add_field(name=f"{item['name']} - {item['price']} coins", value=f"Reward: {role_name}\n{item['description']}", inline=False)
         await ctx.send(embed=embed)
 
-    @shop.command(name="buy")
+    @shop.command(name="buy", description="Buy an item from the shop")
     async def shop_buy(self, ctx, item_name: str):
         async with aiosqlite.connect("bot_data.db") as db:
             db.row_factory = aiosqlite.Row
@@ -137,7 +137,7 @@ class Economy(commands.Cog):
             await self.update_balance(ctx.author.id, item['price']) # Refund
             await ctx.send("Failed to assign role (I might lack permissions). Refunded.")
 
-    @shop.command(name="add")
+    @shop.command(name="add", description="Add an item to the shop (Admin)")
     @commands.has_permissions(administrator=True)
     async def shop_add(self, ctx, name: str, price: int, role: discord.Role, description: str = "No description"):
         async with aiosqlite.connect("bot_data.db") as db:
@@ -147,11 +147,11 @@ class Economy(commands.Cog):
         await ctx.send(f"Added {name} to shop.")
 
     # --- Custom Bets ---
-    @commands.hybrid_group(name="bet")
+    @commands.hybrid_group(name="bet", description="Betting system")
     async def bet(self, ctx):
         pass
 
-    @bet.command(name="create")
+    @bet.command(name="create", description="Create a new bet (Admin)")
     @commands.has_permissions(administrator=True)
     async def bet_create(self, ctx, description: str, options: str):
         # Options separate by comma
@@ -165,7 +165,7 @@ class Economy(commands.Cog):
 
         await ctx.send(f"Bet created! ID: {bet_id}\nOptions: {', '.join(opt_list)}")
 
-    @bet.command(name="place")
+    @bet.command(name="place", description="Place a bet on an active event")
     async def bet_place(self, ctx, bet_id: int, option: str, amount: int):
         bal = await self.get_balance(ctx.author.id)
         if bal < amount: return await ctx.send("Insufficient funds.")
@@ -194,7 +194,7 @@ class Economy(commands.Cog):
 
         await ctx.send(f"Placed {amount} on {option} for Bet #{bet_id}.")
 
-    @bet.command(name="resolve")
+    @bet.command(name="resolve", description="Resolve a bet and distribute winnings (Admin)")
     @commands.has_permissions(administrator=True)
     async def bet_resolve(self, ctx, bet_id: int, winning_option: str):
         async with aiosqlite.connect("bot_data.db") as db:

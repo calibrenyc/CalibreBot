@@ -80,11 +80,11 @@ class Tracking(commands.Cog):
                 await self.log_to_channel(member.guild, embed)
 
     # --- Flagged Words Commands ---
-    @commands.hybrid_group(name="flag")
+    @commands.hybrid_group(name="flag", description="Manage flagged words")
     async def flag_group(self, ctx):
         pass
 
-    @flag_group.command(name="add")
+    @flag_group.command(name="add", description="Add a word to the flagged list")
     @commands.has_permissions(manage_messages=True)
     async def flag_add(self, ctx, word: str):
         async with aiosqlite.connect("bot_data.db") as db:
@@ -95,7 +95,7 @@ class Tracking(commands.Cog):
             except aiosqlite.IntegrityError:
                 await ctx.send("Word is already flagged.")
 
-    @flag_group.command(name="remove")
+    @flag_group.command(name="remove", description="Remove a word from the flagged list")
     @commands.has_permissions(manage_messages=True)
     async def flag_remove(self, ctx, word: str):
         async with aiosqlite.connect("bot_data.db") as db:
@@ -103,7 +103,7 @@ class Tracking(commands.Cog):
             await db.commit()
         await ctx.send(f"Removed `||{word}||` from flagged list.")
 
-    @flag_group.command(name="list")
+    @flag_group.command(name="list", description="List all flagged words")
     @commands.has_permissions(manage_messages=True)
     async def flag_list(self, ctx):
         async with aiosqlite.connect("bot_data.db") as db:

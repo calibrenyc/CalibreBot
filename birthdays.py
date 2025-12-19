@@ -8,11 +8,11 @@ class Birthdays(commands.Cog):
         self.bot = bot
         self.check_birthdays.start()
 
-    @commands.hybrid_group(name="birthday")
+    @commands.hybrid_group(name="birthday", description="Birthday management")
     async def birthday(self, ctx):
         pass
 
-    @birthday.command(name="set")
+    @birthday.command(name="set", description="Set your birthday")
     async def birthday_set(self, ctx, date: str):
         """Format: MM/DD (e.g. 12/25)"""
         try:
