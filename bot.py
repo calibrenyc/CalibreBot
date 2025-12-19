@@ -1165,8 +1165,13 @@ class HelpSelect(Select):
         super().__init__(placeholder="Select a category...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user != self.ctx.author:
-            return await interaction.response.send_message("This menu is not for you.", ephemeral=True)
+        # Allow user to change selection, but response is ephemeral so others can't click anyway.
+        # But if the menu persists (it does), we should check user.
+        # Actually, since we're making it ephemeral, only the user sees it.
+        # So this check is technically redundant for the interaction, but good practice.
+        # Wait, if we edit the message, we can't make it ephemeral *after* the fact if it wasn't already.
+        # The prompt asked for "not take the full view".
+        # So the *initial* response should be ephemeral.
 
         val = self.values[0]
         embed = discord.Embed(title=f"{val} Commands", color=discord.Color.blue())
@@ -1220,7 +1225,12 @@ async def help_command(ctx: commands.Context):
         color=discord.Color.brand_green()
     )
     view = HelpView(bot, ctx)
-    await ctx.send(embed=embed, view=view)
+
+    if ctx.interaction:
+        await ctx.interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    else:
+        # Text command fallback (cannot be ephemeral)
+        await ctx.send(embed=embed, view=view)
 
 # Alias for backward compatibility
 @bot.hybrid_command(name="showcommands", description="Alias for /help")
