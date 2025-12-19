@@ -84,6 +84,18 @@ class DatabaseManager:
                 await db.execute("ALTER TABLE global_users ADD COLUMN card_font TEXT DEFAULT 'default'")
             except Exception: pass
 
+            try:
+                await db.execute("ALTER TABLE global_users ADD COLUMN bg_crop_x INTEGER DEFAULT 0")
+            except Exception: pass
+
+            try:
+                await db.execute("ALTER TABLE global_users ADD COLUMN bg_crop_y INTEGER DEFAULT 0")
+            except Exception: pass
+
+            try:
+                await db.execute("ALTER TABLE global_users ADD COLUMN bg_crop_w INTEGER DEFAULT 0")
+            except Exception: pass
+
             # 6. Shop Items
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS shop_items (

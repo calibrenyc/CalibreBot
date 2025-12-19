@@ -108,6 +108,137 @@ class OpacitySelect(ui.Select):
              await db.commit()
         await interaction.response.send_message(f"Overlay opacity updated to `{int(value*100)}%`!", ephemeral=True)
 
+class CropView(ui.View):
+    def __init__(self, user_id, url, image_bytes):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.url = url
+        self.image_bytes = image_bytes
+        self.img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        self.img_w, self.img_h = self.img.size
+
+        # Calculate max initial crop
+        # Target Ratio 3.6 (900/250)
+        self.target_ratio = 3.6
+
+        # Try max width
+        w = self.img_w
+        h = int(w / self.target_ratio)
+        if h > self.img_h:
+            # Width constrained by height
+            h = self.img_h
+            w = int(h * self.target_ratio)
+
+        self.crop_w = w
+        self.crop_h = h
+
+        # Center it
+        self.crop_x = (self.img_w - self.crop_w) // 2
+        self.crop_y = (self.img_h - self.crop_h) // 2
+
+        self.step = 20 # Pixel step for movement
+
+    def get_file(self):
+        # Crop
+        crop_box = (self.crop_x, self.crop_y, self.crop_x + self.crop_w, self.crop_y + self.crop_h)
+        cropped = self.img.crop(crop_box)
+        resized = cropped.resize((900, 250), Image.Resampling.LANCZOS)
+
+        buffer = io.BytesIO()
+        resized.save(buffer, "PNG")
+        buffer.seek(0)
+        return discord.File(buffer, filename="preview.png")
+
+    async def update_view(self, interaction):
+        f = self.get_file()
+        await interaction.response.edit_message(attachments=[f], view=self)
+
+    @ui.button(label="Zoom In", style=discord.ButtonStyle.secondary, row=0)
+    async def zoom_in(self, interaction: discord.Interaction, button: ui.Button):
+        # Decrease crop size (zooms in on content)
+        # Keep center
+        cx = self.crop_x + self.crop_w // 2
+        cy = self.crop_y + self.crop_h // 2
+
+        new_w = max(100, self.crop_w - 50)
+        new_h = int(new_w / self.target_ratio)
+
+        self.crop_w = new_w
+        self.crop_h = new_h
+
+        # Recenter
+        self.crop_x = cx - self.crop_w // 2
+        self.crop_y = cy - self.crop_h // 2
+        self.clamp()
+        await self.update_view(interaction)
+
+    @ui.button(label="Up", style=discord.ButtonStyle.primary, emoji="⬆️", row=0)
+    async def move_up(self, interaction: discord.Interaction, button: ui.Button):
+        self.crop_y -= self.step
+        self.clamp()
+        await self.update_view(interaction)
+
+    @ui.button(label="Zoom Out", style=discord.ButtonStyle.secondary, row=0)
+    async def zoom_out(self, interaction: discord.Interaction, button: ui.Button):
+        # Increase crop size
+        cx = self.crop_x + self.crop_w // 2
+        cy = self.crop_y + self.crop_h // 2
+
+        # Max dimensions logic
+        # Max width is img_w, BUT max height is img_h
+        # w = h * 3.6
+        max_w_by_h = int(self.img_h * self.target_ratio)
+        max_w = min(self.img_w, max_w_by_h)
+
+        new_w = min(max_w, self.crop_w + 50)
+        new_h = int(new_w / self.target_ratio)
+
+        self.crop_w = new_w
+        self.crop_h = new_h
+
+        self.crop_x = cx - self.crop_w // 2
+        self.crop_y = cy - self.crop_h // 2
+        self.clamp()
+        await self.update_view(interaction)
+
+    @ui.button(label="Left", style=discord.ButtonStyle.primary, emoji="⬅️", row=1)
+    async def move_left(self, interaction: discord.Interaction, button: ui.Button):
+        self.crop_x -= self.step
+        self.clamp()
+        await self.update_view(interaction)
+
+    @ui.button(label="Down", style=discord.ButtonStyle.primary, emoji="⬇️", row=1)
+    async def move_down(self, interaction: discord.Interaction, button: ui.Button):
+        self.crop_y += self.step
+        self.clamp()
+        await self.update_view(interaction)
+
+    @ui.button(label="Right", style=discord.ButtonStyle.primary, emoji="➡️", row=1)
+    async def move_right(self, interaction: discord.Interaction, button: ui.Button):
+        self.crop_x += self.step
+        self.clamp()
+        await self.update_view(interaction)
+
+    @ui.button(label="Save", style=discord.ButtonStyle.green, row=2)
+    async def save(self, interaction: discord.Interaction, button: ui.Button):
+        async with aiosqlite.connect("bot_data.db") as db:
+             await db.execute("""
+                INSERT INTO global_users (user_id, bg_url, bg_crop_x, bg_crop_y, bg_crop_w)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                bg_url = ?, bg_crop_x = ?, bg_crop_y = ?, bg_crop_w = ?
+             """, (interaction.user.id, self.url, self.crop_x, self.crop_y, self.crop_w,
+                   self.url, self.crop_x, self.crop_y, self.crop_w))
+             await db.commit()
+        await interaction.response.edit_message(content="Background Image Saved!", view=None, attachments=[])
+
+    def clamp(self):
+        # Ensure crop box is within image bounds
+        if self.crop_x < 0: self.crop_x = 0
+        if self.crop_y < 0: self.crop_y = 0
+        if self.crop_x + self.crop_w > self.img_w: self.crop_x = self.img_w - self.crop_w
+        if self.crop_y + self.crop_h > self.img_h: self.crop_y = self.img_h - self.crop_h
+
 class ImageModal(ui.Modal, title="Background Image"):
     url_input = ui.TextInput(label="Image URL", placeholder="https://example.com/image.png")
 
@@ -118,13 +249,23 @@ class ImageModal(ui.Modal, title="Background Image"):
              await interaction.response.send_message("Please provide a valid URL starting with http/https.", ephemeral=True)
              return
 
-        async with aiosqlite.connect("bot_data.db") as db:
-             await db.execute("""
-                INSERT INTO global_users (user_id, bg_url) VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET bg_url = ?
-             """, (interaction.user.id, url, url))
-             await db.commit()
-        await interaction.response.send_message("Background image updated!", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=10) as resp:
+                    if resp.status != 200:
+                        await interaction.followup.send("Failed to download image. Check the URL.", ephemeral=True)
+                        return
+                    data = await resp.read()
+
+            # Create View
+            view = CropView(interaction.user.id, url, data)
+            f = view.get_file()
+            await interaction.followup.send("Adjust your background image:", file=f, view=view, ephemeral=True)
+
+        except Exception as e:
+            await interaction.followup.send(f"Error processing image: {e}", ephemeral=True)
 
 class RankSettingsView(ui.View):
     def __init__(self, cog):
@@ -225,6 +366,10 @@ class Leveling(commands.Cog):
         card_opacity = 0.5
         card_font = "default"
 
+        bg_crop_x = 0
+        bg_crop_y = 0
+        bg_crop_w = 0
+
         async with aiosqlite.connect("bot_data.db") as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM global_users WHERE user_id = ?", (user.id,)) as cursor:
@@ -235,6 +380,13 @@ class Leveling(commands.Cog):
                     if profile['card_bg_color']: card_bg_color = profile['card_bg_color']
                     if profile['card_opacity'] is not None: card_opacity = profile['card_opacity']
                     if profile['card_font']: card_font = profile['card_font']
+
+                    # Safe fetch for new columns in case of migration delay/error
+                    try:
+                        if profile['bg_crop_w']: bg_crop_w = profile['bg_crop_w']
+                        if profile['bg_crop_x']: bg_crop_x = profile['bg_crop_x']
+                        if profile['bg_crop_y']: bg_crop_y = profile['bg_crop_y']
+                    except: pass
 
         # Generate Image
         try:
@@ -249,7 +401,14 @@ class Leveling(commands.Cog):
                             if resp.status == 200:
                                 data = await resp.read()
                                 bg_image = Image.open(io.BytesIO(data)).convert("RGBA")
-                                bg_image = bg_image.resize((width, height))
+
+                                # Apply Crop if configured
+                                if bg_crop_w > 0:
+                                    bg_crop_h = int(bg_crop_w / 3.6)
+                                    crop_box = (bg_crop_x, bg_crop_y, bg_crop_x + bg_crop_w, bg_crop_y + bg_crop_h)
+                                    bg_image = bg_image.crop(crop_box)
+
+                                bg_image = bg_image.resize((width, height), Image.Resampling.LANCZOS)
                                 image = bg_image
                             else:
                                 image = Image.new("RGBA", (width, height), self.hex_to_rgb(card_bg_color))
