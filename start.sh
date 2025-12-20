@@ -9,7 +9,7 @@ fi
 
 # Install dependencies
 echo "Installing dependencies..."
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 # Run the bot
 echo "Starting the bot..."

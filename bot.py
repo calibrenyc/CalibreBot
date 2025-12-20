@@ -920,11 +920,27 @@ async def update_bot(ctx):
             await ctx.send("Bot is already up to date.")
             return
 
-        await ctx.send(f"Update successful:\n```\n{output}\n```\nRestarting bot to apply changes...")
+        await ctx.send(f"Update successful:\n```\n{output}\n```\nInstalling dependencies and restarting...")
         await log_audit(ctx.guild, f"{ctx.author.mention} initiated bot update via git pull. Restarting...", discord.Color.orange())
 
-        # Restart process
-        os.execv(sys.executable, ['python'] + sys.argv)
+        # Install Dependencies (Robustly)
+        try:
+            await run_cmd(f"{sys.executable} -m pip install -r requirements.txt")
+        except Exception as e:
+            print(f"Dependency install failed: {e}")
+
+        # Restart process via start.sh (using bash to bypass chmod +x requirement)
+        # We assume bash is at /bin/bash, but let's be safe and just use 'bash' in path if possible,
+        # but execv needs path. /bin/bash is standard.
+        bash_path = "/bin/bash"
+        if not os.path.exists(bash_path):
+            bash_path = "/usr/bin/bash" # Fallback
+
+        if os.path.exists("start.sh") and os.path.exists(bash_path):
+             os.execv(bash_path, [bash_path, "start.sh"])
+        else:
+             # Fallback to direct python restart if start.sh missing
+             os.execv(sys.executable, ['python'] + sys.argv)
 
     except Exception as e:
         await ctx.send(f"An error occurred during update: {e}")
