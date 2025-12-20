@@ -20,9 +20,15 @@ class DatabaseManager:
                     log_channel_id INTEGER,
                     muted_role_id INTEGER,
                     allowed_search_channels TEXT, -- JSON List
-                    mod_roles TEXT -- JSON List
+                    mod_roles TEXT -- JSON List,
+                    xp_rate REAL DEFAULT 1.0
                 )
             """)
+
+            # Schema update for xp_rate if it doesn't exist (migration)
+            try:
+                await db.execute("ALTER TABLE guild_configs ADD COLUMN xp_rate REAL DEFAULT 1.0")
+            except Exception: pass
 
             # 2. Flagged Words
             await db.execute("""
@@ -187,7 +193,7 @@ class DatabaseManager:
                 return {}
 
     async def update_guild_config(self, guild_id, key, value):
-        valid_columns = ['owner_role_id', 'forum_channel_id', 'log_channel_id', 'muted_role_id', 'allowed_search_channels', 'mod_roles']
+        valid_columns = ['owner_role_id', 'forum_channel_id', 'log_channel_id', 'muted_role_id', 'allowed_search_channels', 'mod_roles', 'xp_rate']
         if key not in valid_columns:
             return False
 
