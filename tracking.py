@@ -47,6 +47,7 @@ class Tracking(commands.Cog):
             )
             embed.set_author(name=f"{member}", icon_url=member.display_avatar.url)
             await self.log_to_channel(member.guild, embed)
+            logger.voice(f"{member} joined voice channel {after.channel.name}")
 
         # Left
         elif before.channel is not None and after.channel is None:
@@ -77,12 +78,14 @@ class Tracking(commands.Cog):
                         color=discord.Color.orange(),
                         timestamp=datetime.datetime.now()
                     )
+                    logger.voice(f"{member} was disconnected from {before.channel.name} by {disconnector}")
                 else:
                     embed = discord.Embed(
                         description=f"👋 {member.mention} **left** voice channel {before.channel.mention}",
                         color=discord.Color.red(),
                         timestamp=datetime.datetime.now()
                     )
+                    logger.voice(f"{member} left voice channel {before.channel.name}")
 
                 embed.add_field(name="Duration", value=f"{minutes} mins ({hours} hrs)")
                 embed.set_author(name=f"{member}", icon_url=member.display_avatar.url)
@@ -96,12 +99,14 @@ class Tracking(commands.Cog):
                 timestamp=datetime.datetime.now()
             )
              await self.log_to_channel(member.guild, embed)
+             logger.voice(f"{member} moved from {before.channel.name} to {after.channel.name}")
 
         # Stream / Camera
         if before.self_stream != after.self_stream:
             action = "started streaming" if after.self_stream else "stopped streaming"
             channel = after.channel or before.channel
             channel_mention = channel.mention if channel else "unknown channel"
+            channel_name = channel.name if channel else "unknown channel"
 
             embed = discord.Embed(
                 description=f"🎥 {member.mention} **{action}** in {channel_mention}",
@@ -109,11 +114,13 @@ class Tracking(commands.Cog):
                 timestamp=datetime.datetime.now()
             )
             await self.log_to_channel(member.guild, embed)
+            logger.voice(f"{member} {action} in {channel_name}")
 
         if before.self_video != after.self_video:
             action = "turned on camera" if after.self_video else "turned off camera"
             channel = after.channel or before.channel
             channel_mention = channel.mention if channel else "unknown channel"
+            channel_name = channel.name if channel else "unknown channel"
 
             embed = discord.Embed(
                 description=f"📷 {member.mention} **{action}** in {channel_mention}",
@@ -121,6 +128,7 @@ class Tracking(commands.Cog):
                 timestamp=datetime.datetime.now()
             )
             await self.log_to_channel(member.guild, embed)
+            logger.voice(f"{member} {action} in {channel_name}")
 
     async def award_voice_xp(self, member, minutes):
         if minutes <= 0: return
