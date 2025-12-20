@@ -5,6 +5,7 @@ from config_manager import config_manager
 import datetime
 import asyncio
 import aiosqlite
+import logger
 
 class Tracking(commands.Cog):
     def __init__(self, bot):
@@ -16,14 +17,27 @@ class Tracking(commands.Cog):
         config = await config_manager.get_guild_config(guild.id)
         log_channel_id = config.get('log_channel_id')
         if log_channel_id:
-            channel = guild.get_channel(int(log_channel_id))
-            if channel:
-                await channel.send(embed=embed)
+            try:
+                channel = guild.get_channel(int(log_channel_id))
+                if not channel:
+                    channel = await guild.fetch_channel(int(log_channel_id))
+
+                if channel:
+                    await channel.send(embed=embed)
+                    logger.debug(f"Logged voice event for {guild.name} to {channel.name}")
+                else:
+                    logger.warning(f"Log channel ID {log_channel_id} configured for {guild.name} but channel not found.")
+            except Exception as e:
+                logger.error(f"Failed to send log to channel {log_channel_id} in {guild.name}: {e}")
+        else:
+            logger.debug(f"No log channel configured for {guild.name}")
 
     # --- Voice Tracking ---
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         if member.bot: return
+
+        logger.debug(f"Voice update for {member} in {member.guild}: {before.channel} -> {after.channel}")
 
         # Joined
         if before.channel is None and after.channel is not None:
@@ -107,8 +121,11 @@ class Tracking(commands.Cog):
         # Stream / Camera
         if before.self_stream != after.self_stream:
             action = "started streaming" if after.self_stream else "stopped streaming"
+            channel = after.channel or before.channel
+            channel_mention = channel.mention if channel else "unknown channel"
+
             embed = discord.Embed(
-                description=f"🎥 {member.mention} **{action}** in {after.channel.mention}",
+                description=f"🎥 {member.mention} **{action}** in {channel_mention}",
                 color=discord.Color.purple(),
                 timestamp=datetime.datetime.now()
             )
@@ -116,8 +133,11 @@ class Tracking(commands.Cog):
 
         if before.self_video != after.self_video:
             action = "turned on camera" if after.self_video else "turned off camera"
+            channel = after.channel or before.channel
+            channel_mention = channel.mention if channel else "unknown channel"
+
             embed = discord.Embed(
-                description=f"📷 {member.mention} **{action}** in {after.channel.mention}",
+                description=f"📷 {member.mention} **{action}** in {channel_mention}",
                 color=discord.Color.purple(),
                 timestamp=datetime.datetime.now()
             )
