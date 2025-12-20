@@ -7,10 +7,15 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
-# Install dependencies
-echo "Installing dependencies..."
-python3 -m pip install -r requirements.txt
+while true; do
+    # Install dependencies
+    echo "Installing dependencies..."
+    python3 -m pip install -r requirements.txt
 
-# Run the bot
-echo "Starting the bot..."
-python3 bot.py
+    # Run the bot
+    echo "Starting the bot..."
+    python3 bot.py
+
+    echo "Bot stopped. Restarting in 5 seconds..."
+    sleep 5
+done
