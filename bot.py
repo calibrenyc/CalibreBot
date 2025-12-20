@@ -6,6 +6,10 @@ from dotenv import load_dotenv
 import scrapers
 import asyncio
 import random
+import json
+import subprocess
+import shutil
+import sys
 from config_manager import config_manager
 from database import db_manager
 
@@ -40,6 +44,219 @@ class MyBot(commands.Bot):
         print(f"Commands synced. Bot Version: {BOT_VERSION}")
 
 bot = MyBot()
+
+# Helper to check permissions (Async now)
+async def is_admin_or_mod(obj):
+    """
+    Checks if the user executing the command (Context or Interaction) is an Admin or Mod.
+    obj: can be discord.Interaction or commands.Context
+    """
+    user = obj.author if isinstance(obj, commands.Context) else obj.user
+    guild = obj.guild
+
+    if not guild:
+        return False # No permissions in DMs usually
+
+    # Check Administrator Permission
+    if isinstance(obj, commands.Context):
+        if obj.author.guild_permissions.administrator:
+            return True
+    else:
+        if obj.permissions.administrator:
+            return True
+
+    # Check Configured Mod Roles via DB
+    config = await config_manager.get_guild_config(guild.id)
+    mod_roles = config.get('mod_roles', [])
+
+    if mod_roles:
+        for role in user.roles:
+            if role.id in mod_roles:
+                return True
+
+    # Fallback
+    if OWNER_ROLE_ID:
+        try:
+            if any(r.id == int(OWNER_ROLE_ID) for r in user.roles):
+                return True
+        except:
+            pass
+
+    return False
+
+async def perform_update(interaction_or_ctx):
+    """
+    Handles the full update sequence: Backup, Git Pull, Restore, Restart.
+    """
+    # Determine context for sending messages
+    is_ctx = isinstance(interaction_or_ctx, commands.Context)
+
+    async def send_msg(content):
+        if is_ctx:
+            await interaction_or_ctx.send(content)
+        else:
+            if not interaction_or_ctx.response.is_done():
+                await interaction_or_ctx.response.send_message(content, ephemeral=False) # Public message so we can see logs
+            else:
+                await interaction_or_ctx.followup.send(content, ephemeral=False)
+
+    await send_msg("Checking for updates...")
+    print("Starting update sequence...")
+
+    # Helper to run shell commands
+    async def run_cmd(cmd):
+        print(f"[Update DEBUG] Executing: {cmd}")
+        try:
+            process = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            output = stdout.decode().strip()
+            error = stderr.decode().strip()
+
+            if output: print(f"[stdout] {output}")
+            if error: print(f"[stderr] {error}")
+
+            return process.returncode, output, error
+        except Exception as e:
+            print(f"[Update DEBUG] Error in run_cmd: {e}")
+            raise e
+
+    try:
+        # 1. Backup Guild Config & Database
+        print("Backing up data...")
+        config_backup_path = "guild_configs.json.bak"
+        db_backup_path = "bot_data.db.bak"
+        has_config_backup = False
+        has_db_backup = False
+
+        if os.path.exists("guild_configs.json"):
+            shutil.copy2("guild_configs.json", config_backup_path)
+            has_config_backup = True
+            print("Backed up guild_configs.json")
+
+        if os.path.exists("bot_data.db"):
+            shutil.copy2("bot_data.db", db_backup_path)
+            has_db_backup = True
+            print("Backed up bot_data.db")
+
+        # 2. Git Operations
+        # We assume origin is set up correctly in the environment
+
+        # Git Fetch
+        await send_msg("Fetching origin...")
+        code, out, err = await run_cmd(f"git fetch origin")
+        if code != 0:
+             await send_msg(f"Git fetch failed: {err}")
+             # Attempt repair?
+             # For now, proceed or fail? Fails usually mean repo broken.
+             # We try to reset anyway.
+
+        # Git Reset
+        await send_msg("Resetting to origin/main...")
+        code, out, err = await run_cmd("git reset --hard origin/main")
+        if code != 0:
+             await send_msg(f"Git reset failed: {err}")
+             return
+
+        # Git Pull
+        await send_msg("Pulling origin main...")
+        code, out, err = await run_cmd("git pull origin main")
+        if code != 0:
+             await send_msg(f"Git pull failed: {err}")
+             return
+
+        await send_msg(f"Git Output:\n```\n{out}\n```")
+
+        # 3. Restore Data
+        print("Restoring data...")
+        if has_config_backup and os.path.exists(config_backup_path):
+            shutil.move(config_backup_path, "guild_configs.json")
+            print("Restored guild_configs.json")
+
+        if has_db_backup and os.path.exists(db_backup_path):
+            shutil.move(db_backup_path, "bot_data.db")
+            print("Restored bot_data.db")
+
+        # 4. Save Update State for Post-Restart Notification
+        channel_id = interaction_or_ctx.channel.id
+        state = {
+            "updated": True,
+            "channel_id": channel_id,
+            "version": BOT_VERSION # Old version, new one will be loaded next
+        }
+        with open("update_status.json", "w") as f:
+            json.dump(state, f)
+
+        # 5. Restart
+        await send_msg("Restarting...")
+        print("Closing bot to trigger restart loop...")
+        await bot.close()
+
+    except Exception as e:
+        print(f"Update failed: {e}")
+        await send_msg(f"Update failed with exception: {e}")
+
+@bot.tree.command(name="checkupdate", description="Check for updates and optionally update the bot")
+async def check_update(interaction: discord.Interaction):
+    # Check permissions (Admins only)
+    if not await is_admin_or_mod(interaction): # This checks mod roles too, maybe restrict to Admin?
+        # Usually updates are owner/admin only.
+        if not interaction.user.guild_permissions.administrator and interaction.user.id != interaction.guild.owner_id:
+             return await interaction.response.send_message("You need Administrator permissions to update the bot.", ephemeral=True)
+
+    await interaction.response.defer()
+
+    # Check for updates
+    try:
+        # Run git fetch
+        process = await asyncio.create_subprocess_shell(
+            "git fetch origin",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        await process.communicate()
+
+        # Check status
+        # git rev-list --count HEAD..origin/main
+        process = await asyncio.create_subprocess_shell(
+            "git rev-list --count HEAD..origin/main",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        stdout, _ = await process.communicate()
+        count = stdout.decode().strip()
+
+        if count and count.isdigit() and int(count) > 0:
+            # Update available
+            # We need to hook into the view logic.
+            # Re-implementing a simple inline view here for clarity
+            class UpdateConfirmView(View):
+                def __init__(self):
+                    super().__init__(timeout=60)
+
+                @discord.ui.button(label="Yes", style=discord.ButtonStyle.green)
+                async def confirm(self, i: discord.Interaction, button: discord.ui.Button):
+                    if i.user != interaction.user: return
+                    await i.response.send_message("Starting update...", ephemeral=True)
+                    await perform_update(interaction) # Using original interaction context
+                    self.stop()
+
+                @discord.ui.button(label="No", style=discord.ButtonStyle.red)
+                async def cancel(self, i: discord.Interaction, button: discord.ui.Button):
+                    if i.user != interaction.user: return
+                    await i.response.edit_message(content="Update cancelled.", view=None)
+                    self.stop()
+
+            await interaction.followup.send(f"Update available! ({count} commits behind). Do you want to update?", view=UpdateConfirmView())
+
+        else:
+            await interaction.followup.send("Bot is up to date.")
+
+    except Exception as e:
+        await interaction.followup.send(f"Failed to check for updates: {e}")
 
 class YesNoView(View):
     def __init__(self, ctx):
@@ -293,45 +510,6 @@ class SearchView(View):
         super().__init__()
         self.add_item(SearchResultSelect(results, original_user))
 
-# Helper to check permissions (Async now)
-async def is_admin_or_mod(obj):
-    """
-    Checks if the user executing the command (Context or Interaction) is an Admin or Mod.
-    obj: can be discord.Interaction or commands.Context
-    """
-    user = obj.author if isinstance(obj, commands.Context) else obj.user
-    guild = obj.guild
-
-    if not guild:
-        return False # No permissions in DMs usually
-
-    # Check Administrator Permission
-    if isinstance(obj, commands.Context):
-        if obj.author.guild_permissions.administrator:
-            return True
-    else:
-        if obj.permissions.administrator:
-            return True
-
-    # Check Configured Mod Roles via DB
-    config = await config_manager.get_guild_config(guild.id)
-    mod_roles = config.get('mod_roles', [])
-
-    if mod_roles:
-        for role in user.roles:
-            if role.id in mod_roles:
-                return True
-
-    # Fallback
-    if OWNER_ROLE_ID:
-        try:
-            if any(r.id == int(OWNER_ROLE_ID) for r in user.roles):
-                return True
-        except:
-            pass
-
-    return False
-
 async def log_audit(guild, message, color=discord.Color.blue()):
     """
     Logs an action to the configured log channel.
@@ -468,6 +646,23 @@ async def perform_search(interaction_or_ctx, query, user):
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
     await bot.change_presence(activity=discord.Game(name="in Calibre's Brain"))
+
+    # Check for update status
+    if os.path.exists("update_status.json"):
+        try:
+            with open("update_status.json", "r") as f:
+                data = json.load(f)
+
+            if data.get("updated"):
+                channel_id = data.get("channel_id")
+                if channel_id:
+                    channel = bot.get_channel(channel_id)
+                    if channel:
+                        await channel.send(f"Update complete! Current Version: {BOT_VERSION}")
+
+            os.remove("update_status.json")
+        except Exception as e:
+            print(f"Error processing update status: {e}")
 
     # Send startup message to all configured log channels
     for guild in bot.guilds:
@@ -809,174 +1004,7 @@ async def update_bot(ctx):
     if not ctx.author.guild_permissions.administrator:
         return await ctx.send("You need Administrator permissions.")
 
-    await ctx.send("Checking for updates...")
-    try:
-        import subprocess
-        import sys
-
-        # Helper to run shell commands with NO prompts
-        async def run_cmd(cmd):
-            print(f"[Update DEBUG] Executing: {cmd}")
-            env = os.environ.copy()
-            env["GIT_TERMINAL_PROMPT"] = "0" # Disable prompts
-
-            try:
-                process = await asyncio.create_subprocess_shell(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    env=env
-                )
-                stdout, stderr = await process.communicate()
-                return process.returncode, stdout.decode().strip(), stderr.decode().strip()
-            except Exception as e:
-                print(f"[Update DEBUG] Error in run_cmd: {e}")
-                raise e
-
-        # Determine Pull Target
-        # Priority: GIT_REPO_URL > GITHUB_TOKEN > origin main
-        custom_url = os.getenv('GIT_REPO_URL')
-        gh_token = os.getenv('GITHUB_TOKEN')
-
-        # Detect current branch
-        branch_code, current_branch, _ = await run_cmd("git rev-parse --abbrev-ref HEAD")
-        if branch_code != 0 or not current_branch:
-            current_branch = "main" # Fallback
-
-        print(f"[Update DEBUG] Current branch detected: {current_branch}")
-
-        # Default target
-        pull_cmd = f"git pull origin {current_branch}"
-        repo_url = "https://github.com/calibrenyc/CalibreBot.git"
-
-        if custom_url:
-            pull_cmd = f"git pull {custom_url} {current_branch}"
-            repo_url = custom_url
-        elif gh_token:
-            repo_url = f"https://{gh_token}@github.com/calibrenyc/CalibreBot.git"
-            pull_cmd = f"git pull {repo_url} {current_branch}"
-
-        # Try pull
-        code, output, error = await run_cmd(pull_cmd)
-
-        # Check for "Not a git repository" error
-        if code != 0 and "not a git repository" in error.lower():
-            await ctx.send("⚠️ Git repository not detected. Attempting to initialize and repair...")
-
-            # Repair sequence
-            cmds = [
-                "git init",
-                f"git remote add origin {repo_url}",
-                "git fetch origin",
-                f"git reset --hard origin/{current_branch}" # Safe for untracked files
-            ]
-
-            for cmd in cmds:
-                c, o, e = await run_cmd(cmd)
-                if c != 0:
-                    # Handle "remote already exists"
-                    if "already exists" in e:
-                         await run_cmd(f"git remote set-url origin {repo_url}")
-                         # Retry fetch if this was the add step
-                         if "remote add" in cmd:
-                             continue
-
-                    await ctx.send(f"Repair failed at step: `{cmd}`\nError: `{e}`")
-                    return
-
-            await ctx.send("✅ Repository repaired and synced to latest version.")
-            output = "Repository initialized and reset to origin/main."
-
-        elif code != 0:
-            # Handle Conflicts (Local files vs Repo files)
-            if "untracked working tree files" in error.lower() or "local changes" in error.lower():
-                await ctx.send("⚠️ Local file conflict detected. Forcing update while preserving config and database...")
-
-                # 1. Backup Guild Config & Database
-                config_content = None
-                db_backup_path = "bot_data.db.bak"
-                has_db_backup = False
-
-                # Backup Config
-                if os.path.exists("guild_configs.json"):
-                    try:
-                        with open("guild_configs.json", "r", encoding='utf-8') as f:
-                            config_content = f.read()
-                    except Exception as e:
-                        await ctx.send(f"Failed to backup config: {e}")
-                        return
-
-                # Backup DB
-                if os.path.exists("bot_data.db"):
-                    try:
-                        import shutil
-                        shutil.copy2("bot_data.db", db_backup_path)
-                        has_db_backup = True
-                    except Exception as e:
-                        await ctx.send(f"Failed to backup database: {e}")
-                        return
-
-                # 2. Force Reset
-                await run_cmd(f"git fetch {repo_url}")
-                reset_code, reset_out, reset_err = await run_cmd(f"git reset --hard origin/{current_branch}")
-
-                if reset_code != 0:
-                    await ctx.send(f"Force reset failed:\n```\n{reset_err}\n```")
-                    return
-
-                # 3. Restore Config & Database
-                # Restore Config
-                if config_content:
-                    try:
-                        with open("guild_configs.json", "w", encoding='utf-8') as f:
-                            f.write(config_content)
-                    except Exception as e:
-                        await ctx.send(f"Failed to restore config! Error: {e}")
-
-                # Restore DB
-                if has_db_backup and os.path.exists(db_backup_path):
-                    try:
-                        shutil.move(db_backup_path, "bot_data.db")
-                    except Exception as e:
-                        await ctx.send(f"Failed to restore database! Check {db_backup_path}. Error: {e}")
-
-                output = "Forced update complete. Config and Database restored."
-
-            elif "authentication failed" in error.lower():
-                await ctx.send(f"❌ Authentication Failed. Please check your `GITHUB_TOKEN` in `.env`.\nError: `{error}`")
-                return
-            else:
-                await ctx.send(f"Update failed:\n```\n{error}\n```")
-                return
-
-        if "Already up to date" in output:
-            await ctx.send("Bot is already up to date.")
-            return
-
-        await ctx.send(f"Update successful:\n```\n{output}\n```\nInstalling dependencies and restarting...")
-        await log_audit(ctx.guild, f"{ctx.author.mention} initiated bot update via git pull. Restarting...", discord.Color.orange())
-
-        # Install Dependencies (Robustly)
-        try:
-            await run_cmd(f"{sys.executable} -m pip install -r requirements.txt")
-        except Exception as e:
-            print(f"Dependency install failed: {e}")
-
-        # Restart process via start.sh (using bash to bypass chmod +x requirement)
-        # We assume bash is at /bin/bash, but let's be safe and just use 'bash' in path if possible,
-        # but execv needs path. /bin/bash is standard.
-        bash_path = "/bin/bash"
-        if not os.path.exists(bash_path):
-            bash_path = "/usr/bin/bash" # Fallback
-
-        if os.path.exists("start.sh") and os.path.exists(bash_path):
-             os.execv(bash_path, [bash_path, "start.sh"])
-        else:
-             # Fallback to direct python restart if start.sh missing
-             os.execv(sys.executable, ['python'] + sys.argv)
-
-    except Exception as e:
-        await ctx.send(f"An error occurred during update: {e}")
+    await perform_update(ctx)
 
 @bot.command(name="fix_duplicates", help="Fix duplicate commands by clearing guild commands (Admin/Owner only)")
 async def fix_duplicates(ctx):
