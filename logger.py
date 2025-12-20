@@ -21,3 +21,6 @@ def debug(message):
 
 def success(message):
     print(f"{_get_timestamp()} {Fore.GREEN}[SUCCESS]{Style.RESET_ALL} {message}")
+
+def voice(message):
+    print(f"{_get_timestamp()} {Fore.CYAN}[VOICE]{Style.RESET_ALL} {message}")
