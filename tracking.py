@@ -37,8 +37,6 @@ class Tracking(commands.Cog):
     async def on_voice_state_update(self, member, before, after):
         if member.bot: return
 
-        logger.debug(f"Voice update for {member} in {member.guild}: {before.channel} -> {after.channel}")
-
         # Joined
         if before.channel is None and after.channel is not None:
             self.voice_join_times[member.id] = datetime.datetime.now()
@@ -65,9 +63,9 @@ class Tracking(commands.Cog):
                 disconnector = None
                 try:
                     # Wait briefly for audit log to populate
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(1.0)
                     async for entry in member.guild.audit_logs(limit=1, action=discord.AuditLogAction.member_disconnect):
-                        if entry.target.id == member.id and entry.created_at > discord.utils.utcnow() - datetime.timedelta(seconds=5):
+                        if entry.target.id == member.id and entry.created_at > discord.utils.utcnow() - datetime.timedelta(seconds=10):
                             disconnector = entry.user
                             break
                 except:
@@ -98,25 +96,6 @@ class Tracking(commands.Cog):
                 timestamp=datetime.datetime.now()
             )
              await self.log_to_channel(member.guild, embed)
-
-        # Server Mute / Deafen
-        if before.mute != after.mute:
-            action = "server muted" if after.mute else "server unmuted"
-            embed = discord.Embed(
-                description=f"🔇 {member.mention} was **{action}** in {after.channel.mention if after.channel else 'voice'}",
-                color=discord.Color.gold(),
-                timestamp=datetime.datetime.now()
-            )
-            await self.log_to_channel(member.guild, embed)
-
-        if before.deaf != after.deaf:
-            action = "server deafened" if after.deaf else "server undeafened"
-            embed = discord.Embed(
-                description=f"🙉 {member.mention} was **{action}** in {after.channel.mention if after.channel else 'voice'}",
-                color=discord.Color.gold(),
-                timestamp=datetime.datetime.now()
-            )
-            await self.log_to_channel(member.guild, embed)
 
         # Stream / Camera
         if before.self_stream != after.self_stream:
