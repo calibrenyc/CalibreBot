@@ -1346,6 +1346,28 @@ async def clear(ctx: commands.Context, amount: int = 10):
     except Exception as e:
         await ctx.send(f"Failed to clear messages: {e}", ephemeral=True)
 
+    # Delete the command message itself if possible
+    if not ctx.interaction:
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+
+    # Perform purge
+    try:
+        deleted = await ctx.channel.purge(limit=amount)
+        msg = await ctx.send(f"Deleted {len(deleted)} messages.", ephemeral=True)
+        await log_audit(ctx.guild, f"{ctx.author.mention} cleared {len(deleted)} messages in {ctx.channel.mention}.")
+
+        if not ctx.interaction:
+            await asyncio.sleep(3)
+            await msg.delete()
+
+    except discord.Forbidden:
+        await ctx.send("I do not have permission to manage messages.", ephemeral=True)
+    except Exception as e:
+        await ctx.send(f"Failed to clear messages: {e}", ephemeral=True)
+
 @bot.event
 async def on_command(ctx):
     logger.info(f"Text Command '{ctx.command}' invoked by {ctx.author} in {ctx.guild if ctx.guild else 'DM'}")
