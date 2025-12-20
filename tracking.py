@@ -3,6 +3,8 @@ from discord.ext import commands
 from database import db_manager
 from config_manager import config_manager
 import datetime
+import asyncio
+import aiosqlite
 
 class Tracking(commands.Cog):
     def __init__(self, bot):
@@ -45,11 +47,31 @@ class Tracking(commands.Cog):
                 # Award XP (Simple: 1 XP per minute)
                 await self.award_voice_xp(member, minutes)
 
-                embed = discord.Embed(
-                    description=f"👋 {member.mention} **left** voice channel {before.channel.mention}",
-                    color=discord.Color.red(),
-                    timestamp=datetime.datetime.now()
-                )
+                # Check for Disconnect (Kick)
+                disconnector = None
+                try:
+                    # Wait briefly for audit log to populate
+                    await asyncio.sleep(0.5)
+                    async for entry in member.guild.audit_logs(limit=1, action=discord.AuditLogAction.member_disconnect):
+                        if entry.target.id == member.id and entry.created_at > discord.utils.utcnow() - datetime.timedelta(seconds=5):
+                            disconnector = entry.user
+                            break
+                except:
+                    pass
+
+                if disconnector:
+                    embed = discord.Embed(
+                        description=f"🛑 {member.mention} was **disconnected** from {before.channel.mention} by {disconnector.mention}",
+                        color=discord.Color.orange(),
+                        timestamp=datetime.datetime.now()
+                    )
+                else:
+                    embed = discord.Embed(
+                        description=f"👋 {member.mention} **left** voice channel {before.channel.mention}",
+                        color=discord.Color.red(),
+                        timestamp=datetime.datetime.now()
+                    )
+
                 embed.add_field(name="Duration", value=f"{minutes} mins ({hours} hrs)")
                 embed.set_author(name=f"{member}", icon_url=member.display_avatar.url)
                 await self.log_to_channel(member.guild, embed)
@@ -62,6 +84,44 @@ class Tracking(commands.Cog):
                 timestamp=datetime.datetime.now()
             )
              await self.log_to_channel(member.guild, embed)
+
+        # Server Mute / Deafen
+        if before.mute != after.mute:
+            action = "server muted" if after.mute else "server unmuted"
+            embed = discord.Embed(
+                description=f"🔇 {member.mention} was **{action}** in {after.channel.mention if after.channel else 'voice'}",
+                color=discord.Color.gold(),
+                timestamp=datetime.datetime.now()
+            )
+            await self.log_to_channel(member.guild, embed)
+
+        if before.deaf != after.deaf:
+            action = "server deafened" if after.deaf else "server undeafened"
+            embed = discord.Embed(
+                description=f"🙉 {member.mention} was **{action}** in {after.channel.mention if after.channel else 'voice'}",
+                color=discord.Color.gold(),
+                timestamp=datetime.datetime.now()
+            )
+            await self.log_to_channel(member.guild, embed)
+
+        # Stream / Camera
+        if before.self_stream != after.self_stream:
+            action = "started streaming" if after.self_stream else "stopped streaming"
+            embed = discord.Embed(
+                description=f"🎥 {member.mention} **{action}** in {after.channel.mention}",
+                color=discord.Color.purple(),
+                timestamp=datetime.datetime.now()
+            )
+            await self.log_to_channel(member.guild, embed)
+
+        if before.self_video != after.self_video:
+            action = "turned on camera" if after.self_video else "turned off camera"
+            embed = discord.Embed(
+                description=f"📷 {member.mention} **{action}** in {after.channel.mention}",
+                color=discord.Color.purple(),
+                timestamp=datetime.datetime.now()
+            )
+            await self.log_to_channel(member.guild, embed)
 
     async def award_voice_xp(self, member, minutes):
         if minutes <= 0: return
