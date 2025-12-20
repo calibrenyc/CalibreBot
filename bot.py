@@ -816,17 +816,22 @@ async def update_bot(ctx):
 
         # Helper to run shell commands with NO prompts
         async def run_cmd(cmd):
+            print(f"[Update DEBUG] Executing: {cmd}")
             env = os.environ.copy()
             env["GIT_TERMINAL_PROMPT"] = "0" # Disable prompts
 
-            process = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env
-            )
-            stdout, stderr = await process.communicate()
-            return process.returncode, stdout.decode().strip(), stderr.decode().strip()
+            try:
+                process = await asyncio.create_subprocess_shell(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env
+                )
+                stdout, stderr = await process.communicate()
+                return process.returncode, stdout.decode().strip(), stderr.decode().strip()
+            except Exception as e:
+                print(f"[Update DEBUG] Error in run_cmd: {e}")
+                raise e
 
         # Determine Pull Target
         # Priority: GIT_REPO_URL > GITHUB_TOKEN > origin main
