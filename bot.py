@@ -878,10 +878,14 @@ async def update_bot(ctx):
         elif code != 0:
             # Handle Conflicts (Local files vs Repo files)
             if "untracked working tree files" in error.lower() or "local changes" in error.lower():
-                await ctx.send("⚠️ Local file conflict detected. Forcing update while preserving config...")
+                await ctx.send("⚠️ Local file conflict detected. Forcing update while preserving config and database...")
 
-                # 1. Backup Guild Config
+                # 1. Backup Guild Config & Database
                 config_content = None
+                db_backup_path = "bot_data.db.bak"
+                has_db_backup = False
+
+                # Backup Config
                 if os.path.exists("guild_configs.json"):
                     try:
                         with open("guild_configs.json", "r", encoding='utf-8') as f:
@@ -890,8 +894,17 @@ async def update_bot(ctx):
                         await ctx.send(f"Failed to backup config: {e}")
                         return
 
+                # Backup DB
+                if os.path.exists("bot_data.db"):
+                    try:
+                        import shutil
+                        shutil.copy2("bot_data.db", db_backup_path)
+                        has_db_backup = True
+                    except Exception as e:
+                        await ctx.send(f"Failed to backup database: {e}")
+                        return
+
                 # 2. Force Reset
-                # We need to fetch first to ensure we have the target
                 await run_cmd(f"git fetch {repo_url}")
                 reset_code, reset_out, reset_err = await run_cmd("git reset --hard origin/main")
 
@@ -899,15 +912,23 @@ async def update_bot(ctx):
                     await ctx.send(f"Force reset failed:\n```\n{reset_err}\n```")
                     return
 
-                # 3. Restore Config
+                # 3. Restore Config & Database
+                # Restore Config
                 if config_content:
                     try:
                         with open("guild_configs.json", "w", encoding='utf-8') as f:
                             f.write(config_content)
                     except Exception as e:
-                        await ctx.send(f"Failed to restore config! Check backups if available. Error: {e}")
+                        await ctx.send(f"Failed to restore config! Error: {e}")
 
-                output = "Forced update complete. Config restored."
+                # Restore DB
+                if has_db_backup and os.path.exists(db_backup_path):
+                    try:
+                        shutil.move(db_backup_path, "bot_data.db")
+                    except Exception as e:
+                        await ctx.send(f"Failed to restore database! Check {db_backup_path}. Error: {e}")
+
+                output = "Forced update complete. Config and Database restored."
 
             elif "authentication failed" in error.lower():
                 await ctx.send(f"❌ Authentication Failed. Please check your `GITHUB_TOKEN` in `.env`.\nError: `{error}`")
