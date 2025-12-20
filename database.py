@@ -2,6 +2,7 @@ import aiosqlite
 import json
 import os
 import asyncio
+import logger
 
 DB_FILE = "bot_data.db"
 
@@ -153,7 +154,7 @@ class DatabaseManager:
         if not os.path.exists("guild_configs.json"):
             return
 
-        print("Migrating guild_configs.json to SQLite...")
+        logger.info("Migrating guild_configs.json to SQLite...")
         try:
             with open("guild_configs.json", "r") as f:
                 data = json.load(f)
@@ -177,10 +178,10 @@ class DatabaseManager:
                 await db.commit()
 
             os.rename("guild_configs.json", "guild_configs.json.bak")
-            print("Migration complete. Renamed JSON to .bak")
+            logger.success("Migration complete. Renamed JSON to .bak")
 
         except Exception as e:
-            print(f"Migration failed: {e}")
+            logger.error(f"Migration failed: {e}")
 
     # --- Helper Methods ---
     async def get_guild_config(self, guild_id):

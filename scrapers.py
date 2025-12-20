@@ -2,6 +2,7 @@ import cloudscraper
 from bs4 import BeautifulSoup
 import re
 import os
+import logger
 
 # --- Configuration ---
 ONLINE_FIX_URL = "https://online-fix.me/index.php?do=search"
@@ -41,7 +42,7 @@ def search_online_fix(query):
     Returns a list of dicts: {'title': str, 'link': str, 'source': 'online-fix'}
     """
     results = []
-    print(f"[Scraper] Searching Online-Fix for '{query}'...")
+    logger.info(f"[Scraper] Searching Online-Fix for '{query}'...")
     try:
         # Create a fresh scraper instance for each request to avoid threading issues
         scraper = cloudscraper.create_scraper()
@@ -55,7 +56,7 @@ def search_online_fix(query):
         # Use cloudscraper
         response = scraper.post(ONLINE_FIX_URL, data=data)
         if response.status_code != 200:
-            print(f"[Scraper] Online-fix search failed with status: {response.status_code}")
+            logger.error(f"[Scraper] Online-fix search failed with status: {response.status_code}")
             return results
 
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -90,13 +91,13 @@ def search_online_fix(query):
                         "source": "online-fix.me"
                     })
             except Exception as e:
-                print(f"[Scraper] Error parsing online-fix article: {e}")
+                logger.error(f"[Scraper] Error parsing online-fix article: {e}")
                 continue
                 
     except Exception as e:
-        print(f"[Scraper] Error searching online-fix: {e}")
+        logger.error(f"[Scraper] Error searching online-fix: {e}")
         
-    print(f"[Scraper] Online-Fix found {len(results)} results.")
+    logger.info(f"[Scraper] Online-Fix found {len(results)} results.")
     return results
 
 def search_fitgirl(query):
@@ -104,7 +105,7 @@ def search_fitgirl(query):
     Searches fitgirl-repacks.site for the query.
     """
     results = []
-    print(f"[Scraper] Searching FitGirl for '{query}'...")
+    logger.info(f"[Scraper] Searching FitGirl for '{query}'...")
     
     try:
         scraper = cloudscraper.create_scraper()
@@ -115,7 +116,7 @@ def search_fitgirl(query):
 
         response = scraper.get(FITGIRL_URL, params=params)
         if response.status_code != 200:
-            print(f"[Scraper] FitGirl search failed with status: {response.status_code}")
+            logger.error(f"[Scraper] FitGirl search failed with status: {response.status_code}")
             return results
 
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -139,23 +140,23 @@ def search_fitgirl(query):
                     "source": "fitgirl-repacks.site"
                 })
             except Exception as e:
-                print(f"[Scraper] Error parsing fitgirl title: {e}")
+                logger.error(f"[Scraper] Error parsing fitgirl title: {e}")
                 continue
 
     except Exception as e:
-        print(f"[Scraper] Error searching fitgirl: {e}")
+        logger.error(f"[Scraper] Error searching fitgirl: {e}")
         
-    print(f"[Scraper] FitGirl found {len(results)} results.")
+    logger.info(f"[Scraper] FitGirl found {len(results)} results.")
     return results
 
 if __name__ == "__main__":
     # Test execution
-    print("Testing Scrapers...")
+    logger.info("Testing Scrapers...")
 
     # of_res = search_online_fix("cyberpunk")
     # for r in of_res[:3]:
-    #    print(r)
+    #    logger.info(r)
         
     fg_res = search_fitgirl("cyberpunk")
     for r in fg_res[:3]:
-        print(r)
+        logger.info(r)

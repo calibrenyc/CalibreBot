@@ -12,6 +12,7 @@ import shutil
 import sys
 from config_manager import config_manager
 from database import db_manager
+import logger
 
 # Load environment variables
 load_dotenv()
@@ -41,7 +42,7 @@ class MyBot(commands.Bot):
 
         # Sync slash commands globally
         await self.tree.sync()
-        print(f"Commands synced. Bot Version: {BOT_VERSION}")
+        logger.success(f"Commands synced. Bot Version: {BOT_VERSION}")
 
 bot = MyBot()
 
@@ -101,11 +102,11 @@ async def perform_update(interaction_or_ctx):
                 await interaction_or_ctx.followup.send(content, ephemeral=False)
 
     await send_msg("Checking for updates...")
-    print("Starting update sequence...")
+    logger.info("Starting update sequence...")
 
     # Helper to run shell commands
     async def run_cmd(cmd):
-        print(f"[Update DEBUG] Executing: {cmd}")
+        logger.debug(f"[Update DEBUG] Executing: {cmd}")
         try:
             process = await asyncio.create_subprocess_shell(
                 cmd,
@@ -116,17 +117,17 @@ async def perform_update(interaction_or_ctx):
             output = stdout.decode().strip()
             error = stderr.decode().strip()
 
-            if output: print(f"[stdout] {output}")
-            if error: print(f"[stderr] {error}")
+            if output: logger.debug(f"[stdout] {output}")
+            if error: logger.error(f"[stderr] {error}")
 
             return process.returncode, output, error
         except Exception as e:
-            print(f"[Update DEBUG] Error in run_cmd: {e}")
+            logger.error(f"[Update DEBUG] Error in run_cmd: {e}")
             raise e
 
     try:
         # 1. Backup Guild Config & Database
-        print("Backing up data...")
+        logger.info("Backing up data...")
         config_backup_path = "guild_configs.json.bak"
         db_backup_path = "bot_data.db.bak"
         has_config_backup = False
@@ -135,12 +136,12 @@ async def perform_update(interaction_or_ctx):
         if os.path.exists("guild_configs.json"):
             shutil.copy2("guild_configs.json", config_backup_path)
             has_config_backup = True
-            print("Backed up guild_configs.json")
+            logger.info("Backed up guild_configs.json")
 
         if os.path.exists("bot_data.db"):
             shutil.copy2("bot_data.db", db_backup_path)
             has_db_backup = True
-            print("Backed up bot_data.db")
+            logger.info("Backed up bot_data.db")
 
         # 2. Git Operations
         # We assume origin is set up correctly in the environment
@@ -171,14 +172,14 @@ async def perform_update(interaction_or_ctx):
         await send_msg(f"Git Output:\n```\n{out}\n```")
 
         # 3. Restore Data
-        print("Restoring data...")
+        logger.info("Restoring data...")
         if has_config_backup and os.path.exists(config_backup_path):
             shutil.move(config_backup_path, "guild_configs.json")
-            print("Restored guild_configs.json")
+            logger.info("Restored guild_configs.json")
 
         if has_db_backup and os.path.exists(db_backup_path):
             shutil.move(db_backup_path, "bot_data.db")
-            print("Restored bot_data.db")
+            logger.info("Restored bot_data.db")
 
         # 4. Save Update State for Post-Restart Notification
         channel_id = interaction_or_ctx.channel.id
@@ -192,11 +193,11 @@ async def perform_update(interaction_or_ctx):
 
         # 5. Restart
         await send_msg("Restarting...")
-        print("Closing bot to trigger restart loop...")
+        logger.warning("Closing bot to trigger restart loop...")
         await bot.close()
 
     except Exception as e:
-        print(f"Update failed: {e}")
+        logger.error(f"Update failed: {e}")
         await send_msg(f"Update failed with exception: {e}")
 
 @bot.tree.command(name="checkupdate", description="Check for updates and optionally update the bot")
@@ -417,9 +418,9 @@ class SearchResultSelect(Select):
                             fetched_channel = await bot.fetch_channel(int(forum_channel_id))
                             destination_channel = fetched_channel
                         except:
-                            print(f"Could not fetch FORUM_CHANNEL_ID {forum_channel_id}")
+                            logger.error(f"Could not fetch FORUM_CHANNEL_ID {forum_channel_id}")
                 except ValueError:
-                    print(f"Invalid FORUM_CHANNEL_ID: {forum_channel_id}")
+                    logger.error(f"Invalid FORUM_CHANNEL_ID: {forum_channel_id}")
             
             # If no forum channel configured, fallback to current channel IF allowed?
             # User requirement 3 says: "if no configured channel is set it will alert you... and not post anywhere"
@@ -456,7 +457,7 @@ class SearchResultSelect(Select):
                 return
 
             # --- CREATE NEW THREAD ---
-            print(f"Creating thread for '{thread_name}' in {destination_channel.name} ({destination_channel.type})...")
+            logger.info(f"Creating thread for '{thread_name}' in {destination_channel.name} ({destination_channel.type})...")
             
             thread = None
             message_content = f"{self.original_user.mention} Here is the link you requested:\n{selected_result['link']}"
@@ -499,7 +500,7 @@ class SearchResultSelect(Select):
                     pass
             
         except Exception as e:
-            print(f"Error in callback: {e}")
+            logger.error(f"Error in callback: {e}")
             try:
                 await interaction.followup.send(f"Failed to create thread: {e}", ephemeral=True)
             except:
@@ -525,7 +526,7 @@ async def log_audit(guild, message, color=discord.Color.blue()):
                 embed = discord.Embed(description=message, color=color, timestamp=discord.utils.utcnow())
                 await channel.send(embed=embed)
         except Exception as e:
-            print(f"Failed to log to channel {log_channel_id}: {e}")
+            logger.error(f"Failed to log to channel {log_channel_id}: {e}")
 
 # Legacy alias
 async def log_error(guild, message):
@@ -599,7 +600,7 @@ async def perform_search(interaction_or_ctx, query, user):
              else:
                  await interaction_or_ctx.followup.send(content, view=view, ephemeral=ephemeral)
 
-    print(f"Performing search for '{query}'...")
+    logger.info(f"Performing search for '{query}'...")
 
     try:
         # Run scrapers
@@ -608,7 +609,7 @@ async def perform_search(interaction_or_ctx, query, user):
         fitgirl_results = await bot.loop.run_in_executor(None, scrapers.search_fitgirl, query)
 
         all_results = online_fix_results + fitgirl_results
-        print(f"Total results found: {len(all_results)}")
+        logger.info(f"Total results found: {len(all_results)}")
 
         # Filter Logic
         strict_results = []
@@ -636,15 +637,15 @@ async def perform_search(interaction_or_ctx, query, user):
         view = SearchView(final_results, user)
         await send_msg(msg_content, view=view)
 
-        print("Response sent to user.")
+        logger.success("Response sent to user.")
 
     except Exception as e:
-        print(f"Error during search: {e}")
+        logger.error(f"Error during search: {e}")
         await send_msg(f"An error occurred while searching: {e}")
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user} (ID: {bot.user.id})')
+    logger.success(f'Logged in as {bot.user} (ID: {bot.user.id})')
     await bot.change_presence(activity=discord.Game(name="in Calibre's Brain"))
 
     # Check for update status
@@ -662,7 +663,7 @@ async def on_ready():
 
             os.remove("update_status.json")
         except Exception as e:
-            print(f"Error processing update status: {e}")
+            logger.error(f"Error processing update status: {e}")
 
     # Send startup message to all configured log channels
     for guild in bot.guilds:
@@ -934,7 +935,7 @@ class ConfigGroup(commands.GroupCog, name="config"):
                 bot_top_role = guild.me.top_role
                 await muted_role.edit(position=bot_top_role.position - 1)
             except Exception as e:
-                print(f"Could not move role position: {e}")
+                logger.error(f"Could not move role position: {e}")
 
             # Apply Overwrites to Channels
             perms = discord.PermissionOverwrite(send_messages=False, speak=False, add_reactions=False)
@@ -1187,16 +1188,16 @@ class GameSearch(commands.Cog):
     @commands.hybrid_command(name="search", description="Search for games on Online-Fix and FitGirl")
     @discord.app_commands.describe(query="The game to search for")
     async def search(self, ctx: commands.Context, *, query: str):
-        print(f"Received search command for '{query}' from {ctx.author}")
+        logger.info(f"Received search command for '{query}' from {ctx.author}")
 
         # 1. Handle auto-deletion of request message (if prefix command)
         if not ctx.interaction:
             try:
                 await ctx.message.delete()
             except discord.Forbidden:
-                print("Missing permissions to delete user message.")
+                logger.warning("Missing permissions to delete user message.")
             except Exception as e:
-                print(f"Error deleting message: {e}")
+                logger.error(f"Error deleting message: {e}")
 
         # Defer response
         if ctx.interaction:
@@ -1370,7 +1371,7 @@ async def clear(ctx: commands.Context, amount: int = 10):
 # Main Execution
 if __name__ == "__main__":
     if not TOKEN:
-        print("Error: DISCORD_TOKEN not found in .env")
+        logger.error("Error: DISCORD_TOKEN not found in .env")
     else:
         # Register Cogs on startup
         async def main():

@@ -7,6 +7,7 @@ import io
 import requests
 import aiohttp
 from config_manager import config_manager
+import logger
 
 # --- Views for Settings ---
 
@@ -424,7 +425,7 @@ class Leveling(commands.Cog):
                     image = Image.new("RGBA", (width, height), self.hex_to_rgb(card_bg_color))
             except Exception as e:
                 # Fallback if URL fails
-                print(f"BG Image Load Error: {e}")
+                logger.error(f"BG Image Load Error: {e}")
                 image = Image.new("RGBA", (width, height), self.hex_to_rgb(card_bg_color))
 
             draw = ImageDraw.Draw(image)

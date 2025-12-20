@@ -5,3 +5,4 @@ requests
 cloudscraper
 Pillow
 aiosqlite
+colorama
