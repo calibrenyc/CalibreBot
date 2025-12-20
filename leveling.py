@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw, ImageFont
 import io
 import requests
 import aiohttp
+from config_manager import config_manager
 
 # --- Views for Settings ---
 
@@ -334,7 +335,14 @@ class Leveling(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or not message.guild: return
-        leveled_up, new_level = await self.add_xp(message.guild.id, message.author.id, 15)
+
+        # Calculate XP with Rate
+        base_xp = 15
+        config = await config_manager.get_guild_config(message.guild.id)
+        rate = config.get('xp_rate', 1.0)
+        final_xp = int(base_xp * rate)
+
+        leveled_up, new_level = await self.add_xp(message.guild.id, message.author.id, final_xp)
         if leveled_up:
             await message.channel.send(f"🎉 {message.author.mention} has reached **Level {new_level}**!")
 
@@ -539,3 +547,30 @@ class Leveling(commands.Cog):
             )
 
         await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name="set_xp_rate", description="Set the XP multiplier (Admin/Owner)")
+    async def set_xp_rate(self, ctx, multiplier: float):
+        # Check Admin/Owner
+        if ctx.author.id != ctx.guild.owner_id and not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You need Administrator permissions.", ephemeral=True)
+
+        if multiplier < 0.1:
+            return await ctx.send("Multiplier must be at least 0.1.", ephemeral=True)
+
+        await config_manager.update_guild_config(ctx.guild.id, 'xp_rate', multiplier)
+        await ctx.send(f"XP Rate set to **{multiplier}x**.")
+
+    @commands.hybrid_command(name="add_xp", description="Add XP to a user (Admin/Mod)")
+    @commands.has_permissions(manage_messages=True)
+    async def add_xp_command(self, ctx, user: discord.Member, amount: int):
+        # Using manage_messages as a proxy for 'Mod' permissions if not using the bot's custom mod role check yet for simple perms
+        # But let's check custom mod role too
+        # Actually, let's trust discord permissions for now or use the helper if I imported it?
+        # Helper 'is_admin_or_mod' is in bot.py, not here.
+        # I'll rely on has_permissions(manage_messages=True) + manual check if needed.
+
+        leveled_up, new_level = await self.add_xp(ctx.guild.id, user.id, amount)
+        msg = f"Added {amount} XP to {user.mention}."
+        if leveled_up:
+             msg += f"\n🎉 They reached **Level {new_level}**!"
+        await ctx.send(msg)

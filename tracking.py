@@ -65,7 +65,13 @@ class Tracking(commands.Cog):
 
     async def award_voice_xp(self, member, minutes):
         if minutes <= 0: return
-        xp = minutes * 10 # 10 XP per minute
+
+        # Fetch Rate
+        config = await config_manager.get_guild_config(member.guild.id)
+        rate = config.get('xp_rate', 1.0)
+
+        base_xp = minutes * 10 # 10 XP per minute
+        xp = int(base_xp * rate)
 
         # Use Leveling Cog to handle XP and Level Ups
         leveling_cog = self.bot.get_cog("Leveling")
