@@ -838,16 +838,23 @@ async def update_bot(ctx):
         custom_url = os.getenv('GIT_REPO_URL')
         gh_token = os.getenv('GITHUB_TOKEN')
 
+        # Detect current branch
+        branch_code, current_branch, _ = await run_cmd("git rev-parse --abbrev-ref HEAD")
+        if branch_code != 0 or not current_branch:
+            current_branch = "main" # Fallback
+
+        print(f"[Update DEBUG] Current branch detected: {current_branch}")
+
         # Default target
-        pull_cmd = "git pull origin main"
+        pull_cmd = f"git pull origin {current_branch}"
         repo_url = "https://github.com/calibrenyc/CalibreBot.git"
 
         if custom_url:
-            pull_cmd = f"git pull {custom_url} main"
+            pull_cmd = f"git pull {custom_url} {current_branch}"
             repo_url = custom_url
         elif gh_token:
             repo_url = f"https://{gh_token}@github.com/calibrenyc/CalibreBot.git"
-            pull_cmd = f"git pull {repo_url} main"
+            pull_cmd = f"git pull {repo_url} {current_branch}"
 
         # Try pull
         code, output, error = await run_cmd(pull_cmd)
@@ -861,7 +868,7 @@ async def update_bot(ctx):
                 "git init",
                 f"git remote add origin {repo_url}",
                 "git fetch origin",
-                "git reset --hard origin/main" # Safe for untracked files
+                f"git reset --hard origin/{current_branch}" # Safe for untracked files
             ]
 
             for cmd in cmds:
@@ -911,7 +918,7 @@ async def update_bot(ctx):
 
                 # 2. Force Reset
                 await run_cmd(f"git fetch {repo_url}")
-                reset_code, reset_out, reset_err = await run_cmd("git reset --hard origin/main")
+                reset_code, reset_out, reset_err = await run_cmd(f"git reset --hard origin/{current_branch}")
 
                 if reset_code != 0:
                     await ctx.send(f"Force reset failed:\n```\n{reset_err}\n```")
