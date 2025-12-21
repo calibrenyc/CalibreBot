@@ -108,6 +108,50 @@ class DatabaseManager:
                 await db.execute("ALTER TABLE active_sports_bets ADD COLUMN matchup TEXT DEFAULT NULL")
             except Exception: pass
 
+            # --- Schema Updates for TCFC (v2.3.0) ---
+            # Fighters
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS tcfc_fighters (
+                    user_id INTEGER PRIMARY KEY,
+                    elo INTEGER DEFAULT 1000,
+                    wins INTEGER DEFAULT 0,
+                    losses INTEGER DEFAULT 0,
+                    kos INTEGER DEFAULT 0,
+                    rounds_fought INTEGER DEFAULT 0,
+                    total_damage REAL DEFAULT 0.0
+                )
+            """)
+
+            # Matches
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS tcfc_matches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fighter_a INTEGER,
+                    fighter_b INTEGER,
+                    tournament_id TEXT,
+                    status TEXT DEFAULT 'OPEN', -- OPEN, CLOSED, RESOLVED
+                    winner_id INTEGER,
+                    method TEXT, -- KO, DEC
+                    round INTEGER,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # TCFC Bets
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS tcfc_bets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    match_id INTEGER,
+                    bet_type TEXT, -- WINNER, METHOD, ROUND
+                    selection TEXT,
+                    wager INTEGER,
+                    odds REAL,
+                    potential_payout INTEGER,
+                    status TEXT DEFAULT 'PENDING'
+                )
+            """)
+
             # 6. Shop Items
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS shop_items (
