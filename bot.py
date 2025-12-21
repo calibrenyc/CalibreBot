@@ -21,7 +21,12 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.3.2"
+BOT_VERSION = "2.3.3"
+
+CHANGELOG = {
+    "2.3.3": "✨ **Update v2.3.3**\n- **Help Menu**: Complete overhaul. Commands are now categorized (Sportsbook, Casino, TCFC, etc.) with full lists.\n- **Update Logs**: The bot now details exactly what changed when it updates.\n- **Fixes**: General stability improvements.",
+    "2.3.2": "🥊 **TCFC League Update**\n- Added `/tcfc create_fight` for single ranked matches.\n- Added ELO rating system and betting integration."
+}
 
 # Setup Bot
 class MyBot(commands.Bot):
@@ -671,9 +676,12 @@ async def on_ready():
                         try:
                             chan = guild.get_channel(log_chan_id)
                             if chan:
+                                # Fetch changelog for current version
+                                description = CHANGELOG.get(BOT_VERSION, "A new update has been deployed! Check `/help` for new commands.")
+
                                 embed = discord.Embed(
                                     title=f"🚀 Bot Updated to v{BOT_VERSION}",
-                                    description="A new update has been deployed! Check `/help` for new commands.",
+                                    description=description,
                                     color=discord.Color.teal()
                                 )
                                 embed.timestamp = discord.utils.utcnow()
@@ -1282,60 +1290,77 @@ class HelpSelect(Select):
         self.bot = bot
         self.ctx = ctx
         options = [
-            discord.SelectOption(label="Game Search", emoji="🎮", description="Search games and repacks"),
-            discord.SelectOption(label="Moderation & Tracking", emoji="🛡️", description="Kick, Ban, Mute, Logs"),
-            discord.SelectOption(label="Leveling", emoji="📈", description="Rank cards and XP"),
-            discord.SelectOption(label="Economy", emoji="💰", description="Daily, Shop, Gambling"),
-            discord.SelectOption(label="Fun & Misc", emoji="🎉", description="Random Move, Birthdays"),
-            discord.SelectOption(label="Configuration", emoji="⚙️", description="Setup and Settings"),
+            discord.SelectOption(label="Sportsbook", emoji="🏆", description="Betting on IRL Sports (NFL, NBA, etc.)"),
+            discord.SelectOption(label="Casino", emoji="🎰", description="Blackjack, Slots, High/Low"),
+            discord.SelectOption(label="TCFC League", emoji="🥊", description="Fighting League Management"),
+            discord.SelectOption(label="Economy", emoji="💰", description="Balance, Pay, Shop"),
+            discord.SelectOption(label="Moderation", emoji="🛡️", description="Kick, Ban, Mute, Warn"),
+            discord.SelectOption(label="Leveling", emoji="📈", description="Rank Cards, XP"),
+            discord.SelectOption(label="Fun & Misc", emoji="🎉", description="Game Search, Birthdays"),
+            discord.SelectOption(label="Configuration", emoji="⚙️", description="Setup, Logs, Perms"),
         ]
         super().__init__(placeholder="Select a category...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        # Allow user to change selection, but response is ephemeral so others can't click anyway.
-        # But if the menu persists (it does), we should check user.
-        # Actually, since we're making it ephemeral, only the user sees it.
-        # So this check is technically redundant for the interaction, but good practice.
-        # Wait, if we edit the message, we can't make it ephemeral *after* the fact if it wasn't already.
-        # The prompt asked for "not take the full view".
-        # So the *initial* response should be ephemeral.
-
         val = self.values[0]
         embed = discord.Embed(title=f"{val} Commands", color=discord.Color.blue())
 
         cmds = []
-        if val == "Game Search":
-            cog = self.bot.get_cog("GameSearch")
-            # Use get_commands() for standard Cogs with hybrid commands
-            if cog: cmds = [c for c in cog.get_commands()]
-        elif val == "Moderation & Tracking":
-            # Combine Tracking (new mod) and Moderation (old mod)
-            cog1 = self.bot.get_cog("Tracking")
-            cog2 = self.bot.get_cog("Moderation")
-            if cog1: cmds.extend([c for c in cog1.get_commands()])
-            if cog2: cmds.extend([c for c in cog2.get_commands()])
-        elif val == "Leveling":
-            cog = self.bot.get_cog("Leveling")
-            if cog: cmds = [c for c in cog.get_commands()]
+        if val == "Sportsbook":
+            cog = self.bot.get_cog("Sportsbook")
+            if cog: cmds = [c for c in cog.walk_app_commands()]
+
+        elif val == "Casino":
+            cog = self.bot.get_cog("Casino")
+            if cog: cmds = [c for c in cog.walk_app_commands()]
+
+        elif val == "TCFC League":
+            cog = self.bot.get_cog("TCFC")
+            if cog: cmds = [c for c in cog.walk_app_commands()]
+
         elif val == "Economy":
             cog = self.bot.get_cog("Economy")
-            if cog: cmds = [c for c in cog.get_commands()]
+            if cog: cmds = [c for c in cog.walk_app_commands()]
+
+        elif val == "Moderation":
+            # Combine Tracking (Warns) and Moderation
+            cog1 = self.bot.get_cog("Moderation")
+            cog2 = self.bot.get_cog("Tracking")
+            if cog1: cmds.extend([c for c in cog1.walk_app_commands()])
+            if cog2: cmds.extend([c for c in cog2.walk_app_commands()])
+            # Add text command manual entry if needed (like !sync)
+            embed.add_field(name="!sync", value="Sync commands manually (Admin)", inline=False)
+
+        elif val == "Leveling":
+            cog = self.bot.get_cog("Leveling")
+            if cog: cmds = [c for c in cog.walk_app_commands()]
+
         elif val == "Fun & Misc":
             cog1 = self.bot.get_cog("Fun")
             cog2 = self.bot.get_cog("Birthdays")
-            if cog1: cmds.extend([c for c in cog1.get_commands()])
-            if cog2: cmds.extend([c for c in cog2.get_commands()])
+            cog3 = self.bot.get_cog("GameSearch")
+            if cog1: cmds.extend([c for c in cog1.walk_app_commands()])
+            if cog2: cmds.extend([c for c in cog2.walk_app_commands()])
+            if cog3: cmds.extend([c for c in cog3.walk_app_commands()])
+
         elif val == "Configuration":
             cog = self.bot.get_cog("config")
-            # Config is a GroupCog, so we use walk_app_commands
             if cog: cmds = [c for c in cog.walk_app_commands()]
-            # Add manual commands
             embed.add_field(name="/setup", value="Run the interactive setup wizard.", inline=False)
             embed.add_field(name="@Bot update", value="Update the bot code.", inline=False)
 
+        # Sort commands by name
+        cmds.sort(key=lambda x: x.name)
+
         for cmd in cmds:
             desc = cmd.description if cmd.description else "No description"
-            embed.add_field(name=f"/{cmd.name}", value=desc, inline=False)
+            # Handle Group commands (e.g. /tcfc register)
+            if hasattr(cmd, 'parent') and cmd.parent:
+                name = f"/{cmd.parent.name} {cmd.name}"
+            else:
+                name = f"/{cmd.name}"
+
+            embed.add_field(name=name, value=desc, inline=False)
 
         await interaction.response.edit_message(embed=embed, view=self.view)
 
