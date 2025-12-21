@@ -21,7 +21,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.2.3"
+BOT_VERSION = "2.2.5"
 
 # Setup Bot
 class MyBot(commands.Bot):
