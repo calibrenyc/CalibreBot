@@ -268,6 +268,59 @@ class Sportsbook(commands.Cog):
         view = SportSelectView()
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+    @discord.app_commands.command(name="mybets", description="View your sports betting history")
+    @discord.app_commands.choices(filter=[
+        discord.app_commands.Choice(name="Active Bets", value="active"),
+        discord.app_commands.Choice(name="Bet History", value="history"),
+        discord.app_commands.Choice(name="All Bets", value="all")
+    ])
+    async def mybets(self, interaction: discord.Interaction, filter: discord.app_commands.Choice[str] = None):
+        filter_val = filter.value if filter else "active"
+
+        user_id = interaction.user.id
+        query = "SELECT * FROM active_sports_bets WHERE user_id = ?"
+        params = [user_id]
+
+        if filter_val == "active":
+            query += " AND status = 'PENDING'"
+        elif filter_val == "history":
+            query += " AND status != 'PENDING'"
+
+        query += " ORDER BY id DESC LIMIT 20" # Limit to last 20 for now
+
+        async with aiosqlite.connect("bot_data.db") as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(query, tuple(params)) as cursor:
+                bets = await cursor.fetchall()
+
+        if not bets:
+            await interaction.response.send_message(f"No {filter_val} bets found.", ephemeral=True)
+            return
+
+        embed = discord.Embed(title=f"📜 Your {filter_val.capitalize()} Bets", color=discord.Color.blue())
+
+        for bet in bets:
+            # Format: [WON] NFL - Team vs Team
+            # Moneyline: Team (+150) - 100 -> 250
+            status_emoji = "⏳"
+            if bet['status'] == 'WON': status_emoji = "✅"
+            elif bet['status'] == 'LOST': status_emoji = "❌"
+            elif bet['status'] == 'PUSH': status_emoji = "🤝"
+
+            # Parse selection for display
+            selection = bet['bet_selection']
+            if ':' in selection: selection = selection.split(':')[0] # Remove point for display
+
+            field_name = f"{status_emoji} {bet['sport_key']} - {bet['bet_type']}"
+            field_val = (f"**Selection:** {selection} ({bet['bet_line']})\n"
+                         f"**Wager:** {bet['wager_amount']} 🪙\n"
+                         f"**Payout:** {bet['potential_payout']} 🪙\n"
+                         f"**Date:** {bet['timestamp']}")
+
+            embed.add_field(name=field_name, value=field_val, inline=False)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @tasks.loop(minutes=30)
     async def check_results_loop(self):
         logger.info("Checking sports results...")
