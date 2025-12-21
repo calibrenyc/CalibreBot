@@ -89,6 +89,27 @@ class TCFC(commands.Cog):
         embed = discord.Embed(title=f"🏆 Tournament: {name}", description=desc, color=discord.Color.gold())
         await ctx.send(embed=embed)
 
+    @tcfc.command(name="create_fight", description="Create a single ranked fight (Admin)")
+    @commands.has_permissions(administrator=True)
+    async def create_fight(self, ctx, fighter_a: discord.Member, fighter_b: discord.Member):
+        if fighter_a.id == fighter_b.id:
+            return await ctx.send("Fighters must be different.", ephemeral=True)
+
+        f1 = await self.get_fighter(fighter_a.id)
+        f2 = await self.get_fighter(fighter_b.id)
+
+        if not f1: return await ctx.send(f"{fighter_a.mention} is not registered.", ephemeral=True)
+        if not f2: return await ctx.send(f"{fighter_b.mention} is not registered.", ephemeral=True)
+
+        async with aiosqlite.connect("bot_data.db") as db:
+            await db.execute("INSERT INTO tcfc_matches (fighter_a, fighter_b, tournament_id, status) VALUES (?, ?, 'Single Match', 'OPEN')",
+                             (fighter_a.id, fighter_b.id))
+            await db.commit()
+
+        embed = discord.Embed(title="🥊 New Fight Created", color=discord.Color.green())
+        embed.description = f"**{fighter_a.display_name}** vs **{fighter_b.display_name}**\nStatus: OPEN for betting."
+        await ctx.send(embed=embed)
+
     @tcfc.command(name="active_fights", description="Show active fights")
     async def active_fights(self, ctx):
         async with aiosqlite.connect("bot_data.db") as db:
