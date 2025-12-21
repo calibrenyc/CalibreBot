@@ -103,6 +103,11 @@ class DatabaseManager:
                 await db.execute("ALTER TABLE global_users ADD COLUMN bg_crop_w INTEGER DEFAULT 0")
             except Exception: pass
 
+            # --- Schema Updates for Sportsbook (v2.2.1) ---
+            try:
+                await db.execute("ALTER TABLE active_sports_bets ADD COLUMN matchup TEXT DEFAULT NULL")
+            except Exception: pass
+
             # 6. Shop Items
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS shop_items (
@@ -153,7 +158,8 @@ class DatabaseManager:
                     wager_amount INTEGER,
                     potential_payout INTEGER,
                     status TEXT DEFAULT 'PENDING', -- PENDING, WON, LOST, PUSH
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    matchup TEXT DEFAULT NULL
                 )
             """)
 

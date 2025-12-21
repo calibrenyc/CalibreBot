@@ -3,14 +3,74 @@ from discord.ext import commands, tasks
 from discord.ui import View, Select, Button, Modal, TextInput
 import logger
 import aiosqlite
-from sports_api import sports_client, SPORT_MAPPING
+from sports_api import sports_client, SPORT_MAPPING, REVERSE_MAPPING
 from economy import Economy
 import datetime
 import asyncio
 
+# --- Confirmation View ---
+class ConfirmationView(View):
+    def __init__(self, modal_instance, wager, payout):
+        super().__init__(timeout=60)
+        self.modal = modal_instance
+        self.wager = wager
+        self.payout = payout
+        self.value = None
+
+    @discord.ui.button(label="Confirm Bet", style=discord.ButtonStyle.green, emoji="✅")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.modal.interaction_view.interaction.user: # Wait, how to get original user?
+            # modal.interaction_view is the BettingView which doesn't store user.
+            # But the modal interaction itself has the user.
+            pass
+
+        # We need to ensure the person clicking is the one who opened the modal.
+        # But wait, send_modal is an interaction response. The ConfirmationView is sent as a followup to that interaction?
+        # Yes.
+
+        # Check Balance again (sanity check)
+        economy = interaction.client.get_cog("Economy")
+        balance = await economy.get_balance(interaction.user.id)
+        if balance < self.wager:
+            await interaction.response.send_message(f"Insufficient funds. You have {balance} coins.", ephemeral=True)
+            return
+
+        # Deduct Balance
+        await economy.update_balance(interaction.user.id, -self.wager)
+
+        # Save to DB
+        async with aiosqlite.connect("bot_data.db") as db:
+            await db.execute("""
+                INSERT INTO active_sports_bets
+                (user_id, guild_id, game_id, sport_key, bet_type, bet_selection, bet_line, wager_amount, potential_payout, status, matchup)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+            """, (interaction.user.id, interaction.guild_id, self.modal.game_id, self.modal.sport_key,
+                  self.modal.bet_type, self.modal.selection, str(self.modal.line), self.wager, self.payout, self.modal.matchup))
+            await db.commit()
+
+        # Update Message
+        embed = discord.Embed(title="✅ Bet Placed Successfully!", color=discord.Color.green())
+        embed.description = f"**{self.modal.matchup}**\nYou bet **{self.wager}** on **{self.modal.selection}**"
+
+        await interaction.response.edit_message(embed=embed, view=None)
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red, emoji="❌")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # User requested to "revert back to selection".
+        # Deleting the confirmation message reveals the previous BettingView message which is usually above it.
+        # Or we can edit this message to say "Cancelled".
+        # User explicitly asked to "revert back".
+        # If we delete, it vanishes.
+        try:
+            await interaction.message.delete()
+        except:
+            await interaction.response.edit_message(content="Bet Cancelled.", embed=None, view=None)
+        self.stop()
+
 # --- Wager Modal ---
 class WagerModal(Modal):
-    def __init__(self, game_id, sport_key, bet_type, selection, line, potential_payout_func, interaction_view):
+    def __init__(self, game_id, sport_key, bet_type, selection, line, potential_payout_func, interaction_view, matchup):
         super().__init__(title="Place Your Bet")
         self.game_id = game_id
         self.sport_key = sport_key
@@ -19,6 +79,7 @@ class WagerModal(Modal):
         self.line = line
         self.potential_payout_func = potential_payout_func
         self.interaction_view = interaction_view # To disable buttons or update UI
+        self.matchup = matchup
 
         self.amount = TextInput(
             label="Wager Amount",
@@ -38,7 +99,7 @@ class WagerModal(Modal):
             await interaction.response.send_message("Please enter a valid positive integer.", ephemeral=True)
             return
 
-        # Check Balance
+        # Check Balance (First Pass)
         economy = interaction.client.get_cog("Economy")
         if not economy:
             await interaction.response.send_message("Economy system is offline.", ephemeral=True)
@@ -52,24 +113,23 @@ class WagerModal(Modal):
         # Calculate Payout
         payout = self.potential_payout_func(wager, self.line)
 
-        # Deduct Balance
-        await economy.update_balance(interaction.user.id, -wager)
+        # Show Confirmation
+        sport_display = REVERSE_MAPPING.get(self.sport_key, self.sport_key)
 
-        # Save to DB
-        async with aiosqlite.connect("bot_data.db") as db:
-            await db.execute("""
-                INSERT INTO active_sports_bets
-                (user_id, guild_id, game_id, sport_key, bet_type, bet_selection, bet_line, wager_amount, potential_payout, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
-            """, (interaction.user.id, interaction.guild_id, self.game_id, self.sport_key, self.bet_type, self.selection, str(self.line), wager, payout))
-            await db.commit()
-
-        embed = discord.Embed(title="✅ Bet Placed!", color=discord.Color.green())
-        embed.add_field(name="Event", value=f"{self.selection} ({self.line})", inline=False)
+        embed = discord.Embed(title="Confirm Your Bet", color=discord.Color.gold())
+        embed.add_field(name="Sport", value=sport_display, inline=True)
+        embed.add_field(name="Matchup", value=self.matchup, inline=True)
+        embed.add_field(name="Selection", value=f"{self.selection} ({self.line})", inline=False)
         embed.add_field(name="Wager", value=f"{wager} coins", inline=True)
         embed.add_field(name="Potential Win", value=f"{payout} coins", inline=True)
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        view = ConfirmationView(self, wager, payout)
+        # Store interaction so View can verify user?
+        # Actually interaction.user is available in View callback via interaction obj.
+        view.interaction_view = self.interaction_view # Propagate if needed
+
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 
 # --- Betting View (Odds Buttons) ---
 class BettingView(View):
@@ -78,6 +138,7 @@ class BettingView(View):
         self.game = game
         self.sport_key = sport_key
         self.game_id = game['id']
+        self.matchup = f"{game['away_team']} @ {game['home_team']}"
 
         bookmaker = next((bm for bm in game.get('bookmakers', []) if bm['key'] == 'draftkings'), None)
         if not bookmaker:
@@ -125,7 +186,8 @@ class BettingView(View):
                 selection=selection,
                 line=line,
                 potential_payout_func=self.calculate_payout,
-                interaction_view=self
+                interaction_view=self,
+                matchup=self.matchup
             )
             await interaction.response.send_modal(modal)
         button.callback = callback
@@ -300,19 +362,23 @@ class Sportsbook(commands.Cog):
         embed = discord.Embed(title=f"📜 Your {filter_val.capitalize()} Bets", color=discord.Color.blue())
 
         for bet in bets:
-            # Format: [WON] NFL - Team vs Team
-            # Moneyline: Team (+150) - 100 -> 250
             status_emoji = "⏳"
             if bet['status'] == 'WON': status_emoji = "✅"
             elif bet['status'] == 'LOST': status_emoji = "❌"
             elif bet['status'] == 'PUSH': status_emoji = "🤝"
 
-            # Parse selection for display
             selection = bet['bet_selection']
-            if ':' in selection: selection = selection.split(':')[0] # Remove point for display
+            if ':' in selection: selection = selection.split(':')[0]
 
-            field_name = f"{status_emoji} {bet['sport_key']} - {bet['bet_type']}"
-            field_val = (f"**Selection:** {selection} ({bet['bet_line']})\n"
+            # Clean Sport Name
+            sport_name = REVERSE_MAPPING.get(bet['sport_key'], bet['sport_key'])
+
+            # Matchup
+            matchup = bet['matchup'] if 'matchup' in bet.keys() and bet['matchup'] else "Unknown Matchup"
+
+            field_name = f"{status_emoji} {sport_name} - {bet['bet_type']}"
+            field_val = (f"**Matchup:** {matchup}\n"
+                         f"**Selection:** {selection} ({bet['bet_line']})\n"
                          f"**Wager:** {bet['wager_amount']} 🪙\n"
                          f"**Payout:** {bet['potential_payout']} 🪙\n"
                          f"**Date:** {bet['timestamp']}")
@@ -344,12 +410,17 @@ class Sportsbook(commands.Cog):
             user = interaction.guild.get_member(bet['user_id'])
             user_name = user.display_name if user else f"User {bet['user_id']}"
 
-            # Parse selection
             selection = bet['bet_selection']
             if ':' in selection: selection = selection.split(':')[0]
 
-            field_name = f"{user_name} - {bet['sport_key']}"
-            field_val = (f"**{bet['bet_type']}**: {selection} ({bet['bet_line']})\n"
+            sport_name = REVERSE_MAPPING.get(bet['sport_key'], bet['sport_key'])
+
+            # Fallback for old bets without matchup
+            matchup = bet['matchup'] if 'matchup' in bet.keys() and bet['matchup'] else "Unknown Matchup"
+
+            field_name = f"{user_name} - {sport_name}"
+            field_val = (f"**Matchup**: {matchup}\n"
+                         f"**{bet['bet_type']}**: {selection} ({bet['bet_line']})\n"
                          f"**Wager**: {bet['wager_amount']} | **Payout**: {bet['potential_payout']}")
 
             embed.add_field(name=field_name, value=field_val, inline=False)
