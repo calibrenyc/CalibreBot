@@ -321,6 +321,41 @@ class Sportsbook(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    @discord.app_commands.command(name="allbets", description="View all active bets (Admin Only)")
+    async def allbets(self, interaction: discord.Interaction):
+        # Admin Check
+        from bot import is_admin_or_mod
+        if not await is_admin_or_mod(interaction):
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        async with aiosqlite.connect("bot_data.db") as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM active_sports_bets WHERE status = 'PENDING' ORDER BY id DESC LIMIT 25") as cursor:
+                bets = await cursor.fetchall()
+
+        if not bets:
+            await interaction.response.send_message("No active bets found.", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="📜 All Active Bets (Admin View)", color=discord.Color.red())
+
+        for bet in bets:
+            user = interaction.guild.get_member(bet['user_id'])
+            user_name = user.display_name if user else f"User {bet['user_id']}"
+
+            # Parse selection
+            selection = bet['bet_selection']
+            if ':' in selection: selection = selection.split(':')[0]
+
+            field_name = f"{user_name} - {bet['sport_key']}"
+            field_val = (f"**{bet['bet_type']}**: {selection} ({bet['bet_line']})\n"
+                         f"**Wager**: {bet['wager_amount']} | **Payout**: {bet['potential_payout']}")
+
+            embed.add_field(name=field_name, value=field_val, inline=False)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @tasks.loop(minutes=30)
     async def check_results_loop(self):
         logger.info("Checking sports results...")
