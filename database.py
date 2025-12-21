@@ -139,7 +139,25 @@ class DatabaseManager:
                 )
             """)
 
-            # 9. Birthdays
+            # 9. Active Sports Bets (Plugin 2.2)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS active_sports_bets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    guild_id INTEGER,
+                    game_id TEXT,
+                    sport_key TEXT,
+                    bet_type TEXT, -- moneyline, spread, total
+                    bet_selection TEXT, -- Team Name or Over/Under
+                    bet_line TEXT, -- e.g. -110, +200, or -5.5
+                    wager_amount INTEGER,
+                    potential_payout INTEGER,
+                    status TEXT DEFAULT 'PENDING', -- PENDING, WON, LOST, PUSH
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 10. Birthdays
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS birthdays (
                     user_id INTEGER PRIMARY KEY,
