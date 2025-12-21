@@ -265,9 +265,15 @@ class CategorySelectView(View):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            odds_data = await sports_client.get_odds(self.sport_key)
+            # OPTIMIZATION: Use get_cached_odds first to avoid API call
+            # Only force refresh via admin command
+            odds_data = sports_client.get_cached_odds(self.sport_key)
+
             if not odds_data:
-                await interaction.followup.send("Could not fetch odds at this time.", ephemeral=True)
+                # If cache is empty, we MIGHT try fetch once or tell user to ask admin to refresh?
+                # User requested "Snapshot Logic" (Option B).
+                # So we do NOT call API here.
+                await interaction.followup.send("No odds data available. Please ask an Admin to `/refresh_odds`.", ephemeral=True)
                 return
 
             # Filter Logic
@@ -315,10 +321,11 @@ class SportSelectView(View):
 class Sportsbook(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.check_results_loop.start()
+        # self.check_results_loop.start() # DISABLED for Economy Mode
 
     def cog_unload(self):
-        self.check_results_loop.cancel()
+        # self.check_results_loop.cancel()
+        pass
 
     @discord.app_commands.command(name="sportsbook", description="Open the Sports Betting Menu")
     async def sportsbook(self, interaction: discord.Interaction):
@@ -427,63 +434,78 @@ class Sportsbook(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @tasks.loop(minutes=30)
-    async def check_results_loop(self):
-        logger.info("Checking sports results...")
+    # --- ADMIN: Force Refresh Odds ---
+    @discord.app_commands.command(name="refresh_odds", description="Manually fetch latest odds from API (Admin Only)")
+    async def refresh_odds(self, interaction: discord.Interaction):
+        from bot import is_admin_or_mod
+        if not await is_admin_or_mod(interaction):
+            return await interaction.response.send_message("Admin only.", ephemeral=True)
+
+        await interaction.response.defer()
+        try:
+            count = await sports_client.force_refresh_odds()
+            await interaction.followup.send(f"✅ Odds refreshed for {count} sports categories.")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error refreshing odds: {e}")
+
+    # --- ADMIN: Settle Bets Manually ---
+    @discord.app_commands.command(name="settle_bets", description="Manually settle pending bets (Admin Only)")
+    async def settle_bets(self, interaction: discord.Interaction):
+        from bot import is_admin_or_mod
+        if not await is_admin_or_mod(interaction):
+            return await interaction.response.send_message("Admin only.", ephemeral=True)
+
+        await interaction.response.defer()
+        await self.run_settlement_logic(interaction)
+
+    async def run_settlement_logic(self, interaction):
+        logger.info("Starting manual settlement...")
         try:
             async with aiosqlite.connect("bot_data.db") as db:
                 db.row_factory = aiosqlite.Row
-                # 1. Fetch pending bets
                 async with db.execute("SELECT * FROM active_sports_bets WHERE status = 'PENDING'") as cursor:
                     pending_bets = await cursor.fetchall()
 
                 if not pending_bets:
+                    await interaction.followup.send("No pending bets to settle.")
                     return
 
-                # 2. Group by Sport Key
                 bets_by_sport = {}
                 for bet in pending_bets:
                     key = bet['sport_key']
-                    if key not in bets_by_sport:
-                        bets_by_sport[key] = []
+                    if key not in bets_by_sport: bets_by_sport[key] = []
                     bets_by_sport[key].append(bet)
 
-                # 3. Check scores for each sport
+                settled_count = 0
                 for sport_key, bets in bets_by_sport.items():
+                    # Fetch scores (API CALL)
                     scores = await sports_client.get_scores(sport_key)
-                    if not scores:
-                        continue
+                    if not scores: continue
 
-                    # Process each bet against scores
                     for bet in bets:
                         game_result = next((g for g in scores if g['id'] == bet['game_id'] and g['completed']), None)
-                        if not game_result:
-                            continue # Game not finished or not found
+                        if not game_result: continue
 
-                        # Determine winner
                         status = 'PENDING'
-
-                        # Extract scores
                         if not game_result.get('scores'): continue
 
                         home = game_result['home_team']
                         away = game_result['away_team']
-
                         home_score = next((int(s['score']) for s in game_result['scores'] if s['name'] == home), 0)
                         away_score = next((int(s['score']) for s in game_result['scores'] if s['name'] == away), 0)
 
-                        # LOGIC
-                        if bet['bet_type'] == 'Moneyline':
-                            # bet_selection is Team Name
-                            if bet['bet_selection'] == home:
-                                status = 'WON' if home_score > away_score else 'LOST'
-                            elif bet['bet_selection'] == away:
-                                status = 'WON' if away_score > home_score else 'LOST'
-
-                        # Parsing Fixed Selection for Spread/Total
+                        # Logic Reuse
                         selection = bet['bet_selection']
 
-                        if ':' in selection and bet['bet_type'] in ['Spread', 'Total']:
+                        # Moneyline
+                        if bet['bet_type'] == 'Moneyline':
+                            if selection == home:
+                                status = 'WON' if home_score > away_score else 'LOST'
+                            elif selection == away:
+                                status = 'WON' if away_score > home_score else 'LOST'
+
+                        # Spread/Total
+                        elif ':' in selection:
                             sel_name, point_str = selection.split(':')
                             point = float(point_str)
 
@@ -492,41 +514,35 @@ class Sportsbook(commands.Cog):
                                     status = 'WON' if (home_score + point) > away_score else 'LOST'
                                 elif sel_name == away:
                                     status = 'WON' if (away_score + point) > home_score else 'LOST'
-
                             elif bet['bet_type'] == 'Total':
-                                total_score = home_score + away_score
+                                total = home_score + away_score
                                 if sel_name == "Over":
-                                    status = 'WON' if total_score > point else 'LOST'
+                                    status = 'WON' if total > point else 'LOST'
                                 elif sel_name == "Under":
-                                    status = 'WON' if total_score < point else 'LOST'
-                                elif total_score == point:
+                                    status = 'WON' if total < point else 'LOST'
+                                elif total == point:
                                     status = 'PUSH'
 
-                        # Finalize
-                        if status == 'WON':
-                            economy = self.bot.get_cog("Economy")
-                            if economy:
-                                await economy.update_balance(bet['user_id'], bet['potential_payout'])
-                            await db.execute("UPDATE active_sports_bets SET status = 'WON' WHERE id = ?", (bet['id'],))
-
-                        elif status == 'LOST':
-                             await db.execute("UPDATE active_sports_bets SET status = 'LOST' WHERE id = ?", (bet['id'],))
-
-                        elif status == 'PUSH':
-                             # Refund
-                             economy = self.bot.get_cog("Economy")
-                             if economy:
-                                 await economy.update_balance(bet['user_id'], bet['wager_amount'])
-                             await db.execute("UPDATE active_sports_bets SET status = 'PUSH' WHERE id = ?", (bet['id'],))
+                        if status != 'PENDING':
+                            settled_count += 1
+                            if status == 'WON':
+                                economy = self.bot.get_cog("Economy")
+                                if economy: await economy.update_balance(bet['user_id'], bet['potential_payout'])
+                                await db.execute("UPDATE active_sports_bets SET status = 'WON' WHERE id = ?", (bet['id'],))
+                            elif status == 'LOST':
+                                await db.execute("UPDATE active_sports_bets SET status = 'LOST' WHERE id = ?", (bet['id'],))
+                            elif status == 'PUSH':
+                                economy = self.bot.get_cog("Economy")
+                                if economy: await economy.update_balance(bet['user_id'], bet['wager_amount'])
+                                await db.execute("UPDATE active_sports_bets SET status = 'PUSH' WHERE id = ?", (bet['id'],))
 
                     await db.commit()
 
-        except Exception as e:
-            logger.error(f"Error in sports results loop: {e}")
+            await interaction.followup.send(f"✅ Settlement Complete. Processed {settled_count} bets.")
 
-    @check_results_loop.before_loop
-    async def before_check_results(self):
-        await self.bot.wait_until_ready()
+        except Exception as e:
+            logger.error(f"Settlement Error: {e}")
+            await interaction.followup.send(f"❌ Error during settlement: {e}")
 
 async def setup(bot):
     await bot.add_cog(Sportsbook(bot))
