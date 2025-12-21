@@ -108,6 +108,11 @@ class DatabaseManager:
                 await db.execute("ALTER TABLE active_sports_bets ADD COLUMN matchup TEXT DEFAULT NULL")
             except Exception: pass
 
+            # --- Schema Updates for Config (v2.3.1) ---
+            try:
+                await db.execute("ALTER TABLE guild_configs ADD COLUMN update_log_channel_id INTEGER DEFAULT NULL")
+            except Exception: pass
+
             # --- Schema Updates for TCFC (v2.3.0) ---
             # Fighters
             await db.execute("""
@@ -262,7 +267,7 @@ class DatabaseManager:
                 return {}
 
     async def update_guild_config(self, guild_id, key, value):
-        valid_columns = ['owner_role_id', 'forum_channel_id', 'log_channel_id', 'muted_role_id', 'allowed_search_channels', 'mod_roles', 'xp_rate']
+        valid_columns = ['owner_role_id', 'forum_channel_id', 'log_channel_id', 'muted_role_id', 'allowed_search_channels', 'mod_roles', 'xp_rate', 'update_log_channel_id']
         if key not in valid_columns:
             return False
 

@@ -21,7 +21,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.3.0"
+BOT_VERSION = "2.3.1"
 
 # Setup Bot
 class MyBot(commands.Bot):
@@ -661,6 +661,26 @@ async def on_ready():
                     if channel:
                         await channel.send(f"Update complete! Current Version: {BOT_VERSION}")
 
+                # Public Changelog Announce
+                # Loop through all guilds, find if they have a configured update_log_channel_id
+                # and post the update message there.
+                for guild in bot.guilds:
+                    config = await config_manager.get_guild_config(guild.id)
+                    log_chan_id = config.get('update_log_channel_id')
+                    if log_chan_id:
+                        try:
+                            chan = guild.get_channel(log_chan_id)
+                            if chan:
+                                embed = discord.Embed(
+                                    title=f"🚀 Bot Updated to v{BOT_VERSION}",
+                                    description="A new update has been deployed! Check `/help` for new commands.",
+                                    color=discord.Color.teal()
+                                )
+                                embed.timestamp = discord.utils.utcnow()
+                                await chan.send(embed=embed)
+                        except Exception as ex:
+                            logger.error(f"Failed to post update log in guild {guild.id}: {ex}")
+
             os.remove("update_status.json")
         except Exception as e:
             logger.error(f"Error processing update status: {e}")
@@ -868,6 +888,12 @@ class ConfigGroup(commands.GroupCog, name="config"):
         await config_manager.update_guild_config(interaction.guild_id, 'muted_role_id', role.id)
         await interaction.response.send_message(f"Muted role set to {role.mention}.", ephemeral=True)
         await log_audit(interaction.guild, f"{interaction.user.mention} set Muted Role to {role.mention}.")
+
+    @discord.app_commands.command(name="botupdatelog", description="Set channel for public update logs")
+    async def botupdatelog(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        await config_manager.update_guild_config(interaction.guild_id, 'update_log_channel_id', channel.id)
+        await interaction.response.send_message(f"Update logs will be sent to {channel.mention}.", ephemeral=True)
+        await log_audit(interaction.guild, f"{interaction.user.mention} set Update Log Channel to {channel.mention}.")
 
     @discord.app_commands.command(name="create_mute", description="Create a new Muted role with permissions")
     async def create_mute(self, interaction: discord.Interaction):
@@ -1238,7 +1264,8 @@ async def setup_cogs():
     # List of Extensions to load
     extensions = [
         "sportsbook",
-        "casino"
+        "casino",
+        "tcfc"
     ]
 
     for ext in extensions:
