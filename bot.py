@@ -1228,6 +1228,9 @@ async def setup_cogs():
     await bot.add_cog(Economy(bot))
     await bot.add_cog(Birthdays(bot))
 
+    # Load Sportsbook Plugin (2.2)
+    await bot.load_extension("sportsbook")
+
 class HelpSelect(Select):
     def __init__(self, bot, ctx):
         self.bot = bot
