@@ -21,7 +21,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.2.2"
+BOT_VERSION = "2.2.3"
 
 # Setup Bot
 class MyBot(commands.Bot):
@@ -1214,22 +1214,41 @@ from economy import Economy
 from birthdays import Birthdays
 
 async def setup_cogs():
-    await bot.add_cog(ConfigGroup(bot))
-    # Moderation is now part of Tracking/Advanced Mod, but old Moderation cog exists.
-    # We should merge or replace. The new Tracking cog has 'warn' and 'tempmute'.
-    # Old Moderation had 'kick', 'ban', 'mute', 'unmute'.
-    # I will keep old Moderation for now, and Tracking adds the new ones.
-    await bot.add_cog(Moderation(bot))
-    await bot.add_cog(Fun(bot))
-    await bot.add_cog(GameSearch(bot))
+    logger.info("--- Loading Cogs ---")
 
-    await bot.add_cog(Tracking(bot))
-    await bot.add_cog(Leveling(bot))
-    await bot.add_cog(Economy(bot))
-    await bot.add_cog(Birthdays(bot))
+    # List of Cog Classes to add directly
+    direct_cogs = [
+        (ConfigGroup(bot), "ConfigGroup"),
+        (Moderation(bot), "Moderation"),
+        (Fun(bot), "Fun"),
+        (GameSearch(bot), "GameSearch"),
+        (Tracking(bot), "Tracking"),
+        (Leveling(bot), "Leveling"),
+        (Economy(bot), "Economy"),
+        (Birthdays(bot), "Birthdays")
+    ]
 
-    # Load Sportsbook Plugin (2.2)
-    await bot.load_extension("sportsbook")
+    for cog_instance, name in direct_cogs:
+        try:
+            await bot.add_cog(cog_instance)
+            logger.info(f"✅ Loaded Cog: {name}")
+        except Exception as e:
+            logger.error(f"❌ Failed to load Cog {name}: {e}")
+
+    # List of Extensions to load
+    extensions = [
+        "sportsbook",
+        "casino"
+    ]
+
+    for ext in extensions:
+        try:
+            await bot.load_extension(ext)
+            logger.info(f"✅ Loaded Extension: {ext}")
+        except Exception as e:
+            logger.error(f"❌ Failed to load Extension {ext}: {e}")
+
+    logger.info("--- Cogs Loaded ---")
 
 class HelpSelect(Select):
     def __init__(self, bot, ctx):
