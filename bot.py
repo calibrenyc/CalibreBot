@@ -21,9 +21,10 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.3.3"
+BOT_VERSION = "2.3.4"
 
 CHANGELOG = {
+    "2.3.4": "🛠️ **Fix v2.3.4**\n- **Help Menu Fix**: Resolved issue where some command lists (Fun, Moderation) were empty. All commands should now appear.\n- **Bot Stability**: Minor tweaks.",
     "2.3.3": "✨ **Update v2.3.3**\n- **Help Menu**: Complete overhaul. Commands are now categorized (Sportsbook, Casino, TCFC, etc.) with full lists.\n- **Update Logs**: The bot now details exactly what changed when it updates.\n- **Fixes**: General stability improvements.",
     "2.3.2": "🥊 **TCFC League Update**\n- Added `/tcfc create_fight` for single ranked matches.\n- Added ELO rating system and betting integration."
 }
@@ -1305,60 +1306,75 @@ class HelpSelect(Select):
         val = self.values[0]
         embed = discord.Embed(title=f"{val} Commands", color=discord.Color.blue())
 
+        # Helper to get all commands (slash + text) from a cog
+        def get_cmds(cog_name):
+            cog = self.bot.get_cog(cog_name)
+            if not cog: return []
+
+            # Use a dictionary to deduplicate by name (Hybrid commands appear in both lists sometimes)
+            cmd_dict = {}
+
+            # Slash Commands
+            for c in cog.walk_app_commands():
+                cmd_dict[c.name] = c
+
+            # Text Commands
+            for c in cog.get_commands():
+                if c.name not in cmd_dict:
+                    cmd_dict[c.name] = c
+
+            return list(cmd_dict.values())
+
         cmds = []
         if val == "Sportsbook":
-            cog = self.bot.get_cog("Sportsbook")
-            if cog: cmds = [c for c in cog.walk_app_commands()]
+            cmds = get_cmds("Sportsbook")
 
         elif val == "Casino":
-            cog = self.bot.get_cog("Casino")
-            if cog: cmds = [c for c in cog.walk_app_commands()]
+            cmds = get_cmds("Casino")
 
         elif val == "TCFC League":
-            cog = self.bot.get_cog("TCFC")
-            if cog: cmds = [c for c in cog.walk_app_commands()]
+            cmds = get_cmds("TCFC")
 
         elif val == "Economy":
-            cog = self.bot.get_cog("Economy")
-            if cog: cmds = [c for c in cog.walk_app_commands()]
+            cmds = get_cmds("Economy")
 
         elif val == "Moderation":
-            # Combine Tracking (Warns) and Moderation
-            cog1 = self.bot.get_cog("Moderation")
-            cog2 = self.bot.get_cog("Tracking")
-            if cog1: cmds.extend([c for c in cog1.walk_app_commands()])
-            if cog2: cmds.extend([c for c in cog2.walk_app_commands()])
-            # Add text command manual entry if needed (like !sync)
+            cmds.extend(get_cmds("Moderation"))
+            cmds.extend(get_cmds("Tracking"))
             embed.add_field(name="!sync", value="Sync commands manually (Admin)", inline=False)
 
         elif val == "Leveling":
-            cog = self.bot.get_cog("Leveling")
-            if cog: cmds = [c for c in cog.walk_app_commands()]
+            cmds = get_cmds("Leveling")
 
         elif val == "Fun & Misc":
-            cog1 = self.bot.get_cog("Fun")
-            cog2 = self.bot.get_cog("Birthdays")
-            cog3 = self.bot.get_cog("GameSearch")
-            if cog1: cmds.extend([c for c in cog1.walk_app_commands()])
-            if cog2: cmds.extend([c for c in cog2.walk_app_commands()])
-            if cog3: cmds.extend([c for c in cog3.walk_app_commands()])
+            cmds.extend(get_cmds("Fun"))
+            cmds.extend(get_cmds("Birthdays"))
+            cmds.extend(get_cmds("GameSearch"))
 
         elif val == "Configuration":
-            cog = self.bot.get_cog("config")
-            if cog: cmds = [c for c in cog.walk_app_commands()]
+            cmds = get_cmds("config")
             embed.add_field(name="/setup", value="Run the interactive setup wizard.", inline=False)
             embed.add_field(name="@Bot update", value="Update the bot code.", inline=False)
 
-        # Sort commands by name
+        # Sort
         cmds.sort(key=lambda x: x.name)
 
+        if not cmds and len(embed.fields) == 0:
+            embed.description = "No commands found in this category."
+
         for cmd in cmds:
-            desc = cmd.description if cmd.description else "No description"
-            # Handle Group commands (e.g. /tcfc register)
+            # Determine description
+            if hasattr(cmd, 'description'): desc = cmd.description
+            elif hasattr(cmd, 'help'): desc = cmd.help
+            else: desc = "No description"
+
+            # Determine Name (Slash vs Text)
             if hasattr(cmd, 'parent') and cmd.parent:
                 name = f"/{cmd.parent.name} {cmd.name}"
-            else:
+            elif isinstance(cmd, discord.app_commands.Command):
                 name = f"/{cmd.name}"
+            else:
+                name = f"!{cmd.name}" # Text command assumption
 
             embed.add_field(name=name, value=desc, inline=False)
 
