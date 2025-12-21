@@ -24,6 +24,20 @@ class Casino(commands.Cog):
         ok, msg = await self.check_balance(ctx.author.id, wager)
         if not ok: return await ctx.send(msg, ephemeral=True)
 
+        # Start game logic
+        await self.start_highlow(ctx, wager)
+
+    async def start_highlow(self, ctx, wager):
+        # Determine if we need to deduct wager again?
+        # If this is a "Play Again", the previous loop ended.
+        # So we need to check balance and deduct for every new game.
+        # But this function is called by the command (which checks) AND the button (which needs to check).
+
+        # NOTE: The command checks but doesn't deduct?
+        # Wait, previous implementation didn't deduct upfront for HighLow.
+        # It updated balance at the end (+wager or -wager).
+        # We'll stick to that logic, but ensure "Play Again" checks balance.
+
         # Deck logic
         suits = ['♠️', '♥️', '♦️', '♣️']
         ranks = list(range(2, 11)) + ['J', 'Q', 'K', 'A']
@@ -39,8 +53,16 @@ class Casino(commands.Cog):
         embed = discord.Embed(title="🃏 High or Low", color=discord.Color.purple())
         embed.description = f"Current Card: **{current_rank}{current_suit}**\nWager: {wager}"
 
+        # View needs to know if it's a new game or restart?
+        # Actually, we can just create a new view instance.
         view = HighLowView(ctx, wager, current_val, self.bot)
-        await ctx.send(embed=embed, view=view)
+        if isinstance(ctx, discord.Interaction):
+             if not ctx.response.is_done():
+                 await ctx.response.send_message(embed=embed, view=view)
+             else:
+                 await ctx.followup.send(embed=embed, view=view)
+        else:
+             await ctx.send(embed=embed, view=view)
 
     # --- Blackjack ---
     @commands.hybrid_command(name="blackjack", description="Play Blackjack against the dealer")
@@ -50,7 +72,7 @@ class Casino(commands.Cog):
         ok, msg = await self.check_balance(ctx.author.id, wager)
         if not ok: return await ctx.send(msg, ephemeral=True)
 
-        # Deduct wager immediately for BJ (refund on tie/cancel)
+        # Deduct wager immediately for BJ
         economy = self.bot.get_cog("Economy")
         await economy.update_balance(ctx.author.id, -wager)
 
@@ -69,23 +91,29 @@ class Casino(commands.Cog):
         economy = self.bot.get_cog("Economy")
         await economy.update_balance(ctx.author.id, -wager)
 
-        # Symbols & Weights (Buffalo is rare but high pay)
-        # 🍒, 🔔, 7️⃣, 🦬, 🦅, 🐺
+        # Symbols
         symbols = ["🍒", "🔔", "🍊", "🐺", "🦅", "🦬"]
-        # Weights: Cherry(30), Bell(25), Orange(20), Wolf(15), Eagle(7), Buffalo(3)
-        population = symbols
         weights = [30, 25, 20, 15, 7, 3]
 
-        # 5 Reels, 3 Rows
-        grid = []
-        for _ in range(3): # Rows
-            row = random.choices(population, weights=weights, k=5)
-            grid.append(row)
+        # Animation: Spin 3 times
+        embed = discord.Embed(title="🎰 Buffalo Slots", color=discord.Color.gold())
+        embed.description = "🎰 Spinning..."
+        msg = await ctx.send(embed=embed)
 
-        # Logic: Check lines (simplified)
-        # Standard: Middle Row match? Or Any row match?
-        # Let's do: 3+ matching symbols in a row (Left to Right)
-        # Check all 3 rows.
+        for _ in range(2):
+            fake_grid = []
+            for _ in range(3):
+                row = random.choices(symbols, k=5)
+                fake_grid.append(" | ".join(row))
+            embed.description = "**" + "\n".join(fake_grid) + "**"
+            await msg.edit(embed=embed)
+            await asyncio.sleep(0.7)
+
+        # Final Result
+        grid = []
+        for _ in range(3):
+            row = random.choices(symbols, weights=weights, k=5)
+            grid.append(row)
 
         payout_multipliers = {
             "🍒": {3: 2, 4: 5, 5: 10},
@@ -93,14 +121,13 @@ class Casino(commands.Cog):
             "🍊": {3: 5, 4: 10, 5: 20},
             "🐺": {3: 10, 4: 25, 5: 50},
             "🦅": {3: 20, 4: 50, 5: 100},
-            "🦬": {3: 50, 4: 200, 5: 1000} # Jackpot
+            "🦬": {3: 50, 4: 200, 5: 1000}
         }
 
         total_payout = 0
         winning_lines = []
 
         for r_idx, row in enumerate(grid):
-            # Check L-to-R
             first = row[0]
             count = 1
             for s in row[1:]:
@@ -113,23 +140,66 @@ class Casino(commands.Cog):
                 total_payout += win
                 winning_lines.append(f"Row {r_idx+1}: {count}x {first} (+{win})")
 
-        # Visual
         display = "\n".join([" | ".join(row) for row in grid])
-
-        embed = discord.Embed(title="🎰 Buffalo Slots", color=discord.Color.gold())
         embed.description = f"**{display}**\n\n"
+
+        view = PlayAgainView(ctx, wager, "slots", self.bot) # Add Play Again
 
         if total_payout > 0:
             embed.description += f"**WINNER!**\n" + "\n".join(winning_lines)
             embed.color = discord.Color.green()
-            await economy.update_balance(ctx.author.id, total_payout) # Add winnings
+            await economy.update_balance(ctx.author.id, total_payout)
             embed.add_field(name="Result", value=f"Wager: {wager} | Payout: {total_payout}")
         else:
             embed.description += "**No Win**"
             embed.color = discord.Color.red()
             embed.add_field(name="Result", value=f"Wager: {wager} | Lost")
 
-        await ctx.send(embed=embed)
+        await msg.edit(embed=embed, view=view)
+
+
+# --- Reusable Play Again View ---
+class PlayAgainView(View):
+    def __init__(self, ctx, wager, game_type, bot):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        self.wager = wager
+        self.game_type = game_type
+        self.bot = bot
+
+    @discord.ui.button(label="Play Again", style=discord.ButtonStyle.primary, emoji="🔄")
+    async def play_again(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.ctx.author:
+            return await interaction.response.send_message("Not your game.", ephemeral=True)
+
+        # Relaunch command logic
+        # We need to manually check balance and deduct again because we are bypassing the command decorator
+        casino_cog = self.bot.get_cog("Casino")
+        economy = self.bot.get_cog("Economy")
+
+        # Balance Check
+        bal = await economy.get_balance(interaction.user.id)
+        if bal < self.wager:
+            return await interaction.response.send_message("Insufficient funds to play again.", ephemeral=True)
+
+        await interaction.response.defer() # Acknowledge click
+        self.stop() # Stop listening to old buttons
+
+        if self.game_type == "slots":
+            # Logic duped from command, ideally refactor to shared method
+            # For brevity, calling command via bot.invoke is hard with interaction context mismatch
+            # So we call the Casino method directly (which I should refactor to be callable)
+            # Refactoring slots to `run_slots`
+            await casino_cog.slots(self.ctx, self.wager) # Re-using context is safe enough
+
+        elif self.game_type == "blackjack":
+            await economy.update_balance(interaction.user.id, -self.wager)
+            game = BlackjackGame(self.ctx, self.wager, economy)
+            await game.start()
+
+        elif self.game_type == "highlow":
+            # HighLow logic doesn't deduct upfront, checks at start
+            await casino_cog.start_highlow(self.ctx, self.wager)
 
 
 # --- High/Low View ---
@@ -149,11 +219,6 @@ class HighLowView(View):
         return True
 
     async def end_game(self, interaction, won, next_card_str):
-        # Deduct or Add
-        # Logic: Wager is only deducted on Loss (to support "Double or Nothing" style? Or standard?)
-        # Standard: Deduct upfront? No, command didn't deduct yet.
-        # So: Win -> Add Wager (Profit). Loss -> Deduct Wager.
-
         if won:
             await self.economy.update_balance(self.ctx.author.id, self.wager)
             result = f"Correct! The card was {next_card_str}.\nYou won {self.wager} coins!"
@@ -164,7 +229,11 @@ class HighLowView(View):
             color = discord.Color.red()
 
         embed = discord.Embed(title="🃏 High or Low Result", description=result, color=color)
-        await interaction.response.edit_message(embed=embed, view=None)
+
+        # Add Play Again Button
+        view = PlayAgainView(self.ctx, self.wager, "highlow", self.bot)
+
+        await interaction.response.edit_message(embed=embed, view=view)
         self.stop()
 
     def draw(self):
@@ -179,7 +248,6 @@ class HighLowView(View):
     async def higher(self, interaction: discord.Interaction, button: discord.ui.Button):
         rank, suit, val = self.draw()
         card_str = f"{rank}{suit}"
-        # Tie implies loss in simple High/Low usually, or push? Let's say Tie = Push (Refund/No change).
         if val > self.current_val:
             await self.end_game(interaction, True, card_str)
         elif val < self.current_val:
@@ -208,38 +276,56 @@ class BlackjackGame:
         self.ctx = ctx
         self.wager = wager
         self.economy = economy
-        self.deck = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11] * 4 # Infinite shoe approx
+        # Deck: Standard 52 card logic representation
+        self.suits = ['♠️', '♥️', '♦️', '♣️']
+        self.ranks = {
+            2: '2️⃣', 3: '3️⃣', 4: '4️⃣', 5: '5️⃣', 6: '6️⃣', 7: '7️⃣', 8: '8️⃣', 9: '9️⃣', 10: '🔟',
+            11: 'J', 12: 'Q', 13: 'K', 14: 'A'
+        }
+        self.values = {k: min(k, 10) for k in range(2, 15)}
+        self.values[14] = 11 # Ace default
+
         self.player_hand = []
         self.dealer_hand = []
 
-    def deal(self):
-        return random.choice(self.deck)
+    def deal_card(self):
+        rank_val = random.randint(2, 14)
+        suit = random.choice(self.suits)
+        display = f"{self.ranks[rank_val]}{suit}"
+        value = self.values[rank_val]
+        return {'display': display, 'value': value}
 
     def calc_score(self, hand):
-        score = sum(hand)
-        aces = hand.count(11)
+        score = sum(c['value'] for c in hand)
+        aces = sum(1 for c in hand if c['value'] == 11)
         while score > 21 and aces:
             score -= 10
             aces -= 1
         return score
 
     async def start(self):
-        self.player_hand = [self.deal(), self.deal()]
-        self.dealer_hand = [self.deal(), self.deal()]
-
+        self.player_hand = [self.deal_card(), self.deal_card()]
+        self.dealer_hand = [self.deal_card(), self.deal_card()]
         await self.update_view()
 
     async def update_view(self, ended=False, result_msg=None):
         p_score = self.calc_score(self.player_hand)
         d_score = self.calc_score(self.dealer_hand)
 
-        desc = f"**Your Hand:** {self.player_hand} (Score: {p_score})\n"
+        p_hand_str = " ".join([c['display'] for c in self.player_hand])
 
         if ended:
-            desc += f"**Dealer Hand:** {self.dealer_hand} (Score: {d_score})\n\n{result_msg}"
-            view = None
+            d_hand_str = " ".join([c['display'] for c in self.dealer_hand])
+            desc = f"**Your Hand:** {p_hand_str} (Score: {p_score})\n"
+            desc += f"**Dealer Hand:** {d_hand_str} (Score: {d_score})\n\n{result_msg}"
+
+            # Show Play Again button
+            view = PlayAgainView(self.ctx, self.wager, "blackjack", self.ctx.bot)
         else:
-            desc += f"**Dealer Hand:** [{self.dealer_hand[0]}, ?]"
+            # Hide hole card
+            d_hand_str = f"{self.dealer_hand[0]['display']} 🂠"
+            desc = f"**Your Hand:** {p_hand_str} (Score: {p_score})\n"
+            desc += f"**Dealer Hand:** {d_hand_str}"
             view = BlackjackView(self)
 
         embed = discord.Embed(title="♠️ Blackjack", description=desc, color=discord.Color.blue())
@@ -250,17 +336,16 @@ class BlackjackGame:
             self.message = await self.ctx.send(embed=embed, view=view)
 
     async def hit(self, interaction):
-        self.player_hand.append(self.deal())
+        self.player_hand.append(self.deal_card())
         if self.calc_score(self.player_hand) > 21:
             await self.update_view(ended=True, result_msg="❌ **Bust!** You lose.")
         else:
-            await interaction.response.defer() # Acknowledge
+            await interaction.response.defer()
             await self.update_view()
 
     async def stand(self, interaction):
-        # Dealer turn
         while self.calc_score(self.dealer_hand) < 17:
-            self.dealer_hand.append(self.deal())
+            self.dealer_hand.append(self.deal_card())
 
         p_score = self.calc_score(self.player_hand)
         d_score = self.calc_score(self.dealer_hand)
@@ -280,7 +365,6 @@ class BlackjackGame:
         await self.update_view(ended=True, result_msg=msg)
 
     async def double(self, interaction):
-        # Check balance for double
         bal = await self.economy.get_balance(self.ctx.author.id)
         if bal < self.wager:
             await interaction.response.send_message("Insufficient funds to double.", ephemeral=True)
@@ -289,13 +373,12 @@ class BlackjackGame:
         await self.economy.update_balance(self.ctx.author.id, -self.wager)
         self.wager *= 2
 
-        self.player_hand.append(self.deal())
+        self.player_hand.append(self.deal_card())
         p_score = self.calc_score(self.player_hand)
 
         if p_score > 21:
              await self.update_view(ended=True, result_msg="❌ **Bust!** You lose (Doubled).")
         else:
-             # Auto stand after double
              await self.stand(interaction)
 
 class BlackjackView(View):

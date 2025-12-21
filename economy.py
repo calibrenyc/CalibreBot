@@ -263,3 +263,45 @@ class Economy(commands.Cog):
             await db.commit()
 
         await ctx.send(f"Bet #{bet_id} resolved! Winner: {winning_option}. Pool: {total_pool}.")
+
+    # --- Admin Money Commands (v2.2.2) ---
+    @commands.hybrid_command(name="add_money", description="Give coins to a user (Admin Only)")
+    @commands.has_permissions(administrator=True)
+    async def add_money(self, ctx, user: discord.Member, amount: int):
+        if amount <= 0:
+            return await ctx.send("Amount must be positive.", ephemeral=True)
+
+        new_bal = await self.update_balance(user.id, amount)
+        await ctx.send(f"✅ Added {amount} coins to {user.mention}. New Balance: {new_bal}")
+
+    @commands.hybrid_command(name="remove_money", description="Remove coins from a user (Admin Only)")
+    @commands.has_permissions(administrator=True)
+    async def remove_money(self, ctx, user: discord.Member, amount: int):
+        if amount <= 0:
+            return await ctx.send("Amount must be positive.", ephemeral=True)
+
+        # Check balance first
+        current = await self.get_balance(user.id)
+        if current < amount:
+            return await ctx.send(f"User only has {current} coins.", ephemeral=True)
+
+        new_bal = await self.update_balance(user.id, -amount)
+        await ctx.send(f"✅ Removed {amount} coins from {user.mention}. New Balance: {new_bal}")
+
+    @commands.hybrid_command(name="pay", description="Give money to another user")
+    async def pay(self, ctx, user: discord.Member, amount: int):
+        if user.id == ctx.author.id:
+            return await ctx.send("You cannot pay yourself.", ephemeral=True)
+        if amount <= 0:
+            return await ctx.send("Amount must be positive.", ephemeral=True)
+
+        # Check sender balance
+        sender_bal = await self.get_balance(ctx.author.id)
+        if sender_bal < amount:
+            return await ctx.send(f"Insufficient funds. You have {sender_bal} coins.", ephemeral=True)
+
+        # Transfer
+        await self.update_balance(ctx.author.id, -amount)
+        await self.update_balance(user.id, amount)
+
+        await ctx.send(f"💸 {ctx.author.mention} paid {amount} coins to {user.mention}!")
