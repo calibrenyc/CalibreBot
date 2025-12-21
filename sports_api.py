@@ -23,6 +23,10 @@ SPORT_MAPPING = {
     "Boxing": "boxing_boxing"
 }
 
+# Reverse Mapping for display
+# API Key -> User Friendly
+REVERSE_MAPPING = {v: k for k, v in SPORT_MAPPING.items()}
+
 class OddsAPIClient:
     def __init__(self):
         self.api_key = API_KEY
