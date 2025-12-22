@@ -5,6 +5,7 @@ import random
 import math
 import logger
 from discord.ui import Select, View, Button, Modal, TextInput
+from config_manager import config_manager
 
 class TCFC(commands.Cog):
     def __init__(self, bot):
@@ -29,9 +30,31 @@ class TCFC(commands.Cog):
             else: return int(100 * ((1-p)/p))
         return prob_to_american(prob_a), prob_to_american(1-prob_a)
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # Skip check for setup commands
+        if interaction.command.name in ['setup', 'create_tournament', 'create_fight', 'report']:
+            return True
+
+        config = await config_manager.get_guild_config(interaction.guild_id)
+        channel_id = config.get('tcfc_channel_id')
+
+        if channel_id and interaction.channel_id != channel_id:
+            await interaction.response.send_message(f"TCFC commands are locked to <#{channel_id}>.", ephemeral=True)
+            return False
+        return True
+
     @commands.hybrid_group(name="tcfc", description="The Collective Fighting League")
     async def tcfc(self, ctx):
         pass
+
+    # --- SETUP COMMAND ---
+    @tcfc.command(name="setup", description="Configure TCFC (Channel & Analyst Role) - Owner Only")
+    async def setup_tcfc(self, ctx):
+        if ctx.author.id != ctx.guild.owner_id:
+            return await ctx.send("Only the Server Owner can configure TCFC.", ephemeral=True)
+
+        view = SetupView(ctx)
+        await ctx.send("Starting TCFC Setup...", view=view, ephemeral=True)
 
     @tcfc.command(name="register", description="Register as a fighter")
     async def register(self, ctx):
@@ -142,8 +165,20 @@ class TCFC(commands.Cog):
         await ctx.send(embed=embed)
 
     @tcfc.command(name="report", description="Report fight result (Analyst)")
-    @commands.has_permissions(manage_messages=True) # Proxy for Analyst role check
     async def report(self, ctx, match_id: int, winner: discord.Member, method: str, rounds: int, damage_bonus: float = 0.0):
+        # Role Check
+        config = await config_manager.get_guild_config(ctx.guild.id)
+        analyst_role_id = config.get('tcfc_analyst_role_id')
+
+        is_analyst = False
+        if analyst_role_id:
+            role = ctx.guild.get_role(analyst_role_id)
+            if role and role in ctx.author.roles:
+                is_analyst = True
+
+        if not is_analyst and not ctx.author.guild_permissions.administrator:
+            return await ctx.send("Only the TCFC Analyst or Admins can report results.", ephemeral=True)
+
         # 1. Update Match
         async with aiosqlite.connect("bot_data.db") as db:
             db.row_factory = aiosqlite.Row
@@ -192,17 +227,8 @@ class TCFC(commands.Cog):
                 won = False
                 if bet['bet_type'] == 'WINNER' and int(bet['selection']) == winner.id:
                     won = True
-                # Add logic for METHOD/ROUND bets if stored differently
 
                 if won:
-                    # Calculate payout based on Odds
-                    # Assuming stored odds or just even money for MVP?
-                    # Let's assume standard odds payout stored in `potential_payout` logic later
-                    # For now, just 2x? Or retrieve odds?
-                    # Plan says "Uses ELO system to determine Odds".
-                    # So we need to have stored the odds at bet time or recalc?
-                    # Stored in `odds` column? Not in my schema yet.
-                    # I'll pay 2x as placeholder or calc if needed.
                     await econ.update_balance(bet['user_id'], bet['wager'] * 2) # Placeholder
                     payout_count += 1
                     await db.execute("UPDATE tcfc_bets SET status = 'WON' WHERE id = ?", (bet['id'],))
@@ -215,7 +241,8 @@ class TCFC(commands.Cog):
 
     @tcfc.command(name="bet", description="Bet on a TCFC fight")
     async def tcfc_bet(self, ctx):
-        # Interactive View
+        # Check permissions handled by interaction_check above
+
         async with aiosqlite.connect("bot_data.db") as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM tcfc_matches WHERE status = 'OPEN'") as cursor:
@@ -226,8 +253,73 @@ class TCFC(commands.Cog):
         view = MatchSelectView(matches, self.bot, self)
         await ctx.send("Select a match to bet on:", view=view, ephemeral=True)
 
-# ... [View Classes like MatchSelectView, BetTypeView, FighterSelectView, WagerModalTCFC] ...
-# Due to length, I will condense the View logic similar to previous steps.
+# --- VIEWS ---
+
+class SetupView(View):
+    def __init__(self, ctx):
+        super().__init__(timeout=120)
+        self.ctx = ctx
+
+    @discord.ui.button(label="Set Channel", style=discord.ButtonStyle.primary, emoji="#️⃣")
+    async def set_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Please mention the channel to lock TCFC commands to.", ephemeral=True)
+
+        def check(m): return m.author == self.ctx.author and m.channel == self.ctx.channel and m.channel_mentions
+
+        try:
+            msg = await self.ctx.bot.wait_for('message', check=check, timeout=30)
+            channel = msg.channel_mentions[0]
+            await config_manager.update_guild_config(interaction.guild_id, 'tcfc_channel_id', channel.id)
+            await interaction.followup.send(f"✅ TCFC locked to {channel.mention}.", ephemeral=True)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("Timed out.", ephemeral=True)
+
+    @discord.ui.button(label="Configure Analyst", style=discord.ButtonStyle.success, emoji="🕵️")
+    async def config_analyst(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = AnalystRoleView(self.ctx)
+        await interaction.response.send_message("Do you have an existing Analyst role?", view=view, ephemeral=True)
+
+class AnalystRoleView(View):
+    def __init__(self, ctx):
+        super().__init__()
+        self.ctx = ctx
+
+    @discord.ui.button(label="Yes, select existing", style=discord.ButtonStyle.primary)
+    async def select_existing(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # We can't use RoleSelect in ephemeral nicely without a View update?
+        # Actually we can just ask for a mention like channel.
+        await interaction.response.send_message("Please mention the existing Analyst role.", ephemeral=True)
+
+        def check(m): return m.author == self.ctx.author and m.channel == self.ctx.channel and m.role_mentions
+
+        try:
+            msg = await self.ctx.bot.wait_for('message', check=check, timeout=30)
+            role = msg.role_mentions[0]
+            await config_manager.update_guild_config(interaction.guild_id, 'tcfc_analyst_role_id', role.id)
+            await interaction.followup.send(f"✅ Analyst role set to {role.mention}.", ephemeral=True)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("Timed out.", ephemeral=True)
+
+    @discord.ui.button(label="No, create new", style=discord.ButtonStyle.secondary)
+    async def create_new(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(CreateRoleModal(interaction.guild_id))
+
+class CreateRoleModal(Modal):
+    def __init__(self, guild_id):
+        super().__init__(title="Create Analyst Role")
+        self.guild_id = guild_id
+        self.role_name = TextInput(label="Role Name", default="TCFC Analyst")
+        self.add_item(self.role_name)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            role = await interaction.guild.create_role(name=self.role_name.value, reason="TCFC Setup")
+            await config_manager.update_guild_config(self.guild_id, 'tcfc_analyst_role_id', role.id)
+            await interaction.response.send_message(f"✅ Created and set role: {role.mention}", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Failed: {e}", ephemeral=True)
+
+# ... [Previous Betting Views (MatchSelect, etc.) maintained below] ...
 
 class MatchSelect(Select):
     def __init__(self, matches, bot, cog):
@@ -274,8 +366,6 @@ class FighterSelectView(View):
         self.bot = bot
         self.cog = cog
 
-        # We need guild context to get names, but interaction has it
-        # Just use ID for label for now
         self.add_item(self.create_btn(match['fighter_a'], "Fighter A"))
         self.add_item(self.create_btn(match['fighter_b'], "Fighter B"))
 
