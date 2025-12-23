@@ -5,6 +5,7 @@ import random
 import asyncio
 import time
 from config_manager import config_manager
+import aiosqlite
 
 # --- Deck Helper ---
 def get_deck():
@@ -22,11 +23,83 @@ def get_deck():
     return deck * 4
 
 def evaluate_hand(cards):
+    # Sort by rank
     ranks = sorted([c['rank'] for c in cards], reverse=True)
+    suits = [c['display'][-1] for c in cards] # Get emoji suit
+
+    # Check Flush
+    is_flush = False
+    flush_suit = None
+    for s in ['♠️', '♥️', '♦️', '♣️']:
+        if suits.count(s) >= 5:
+            is_flush = True
+            flush_suit = s
+            break
+
+    # Check Straight
+    unique_ranks = sorted(list(set(ranks)), reverse=True)
+    is_straight = False
+    straight_high = 0
+
+    # Handle Ace low (A, 5, 4, 3, 2)
+    if {14, 5, 4, 3, 2}.issubset(set(unique_ranks)):
+        is_straight = True
+        straight_high = 5
+
+    for i in range(len(unique_ranks) - 4):
+        window = unique_ranks[i:i+5]
+        if window[0] - window[4] == 4:
+            is_straight = True
+            straight_high = window[0]
+            break
+
+    # Counts
     counts = {r: ranks.count(r) for r in ranks}
+    quads = [r for r, c in counts.items() if c == 4]
+    trips = [r for r, c in counts.items() if c == 3]
     pairs = [r for r, c in counts.items() if c == 2]
 
-    if len(pairs) >= 1: return 100 + pairs[0], "Pair"
+    # 1. Straight Flush
+    # This simplified check assumes if you have a straight and a flush, it's a straight flush.
+    # A true check would require filtering cards by flush suit first.
+    if is_flush and is_straight:
+        # Strict check
+        flush_cards = [c for c in cards if c['display'][-1] == flush_suit]
+        f_ranks = sorted([c['rank'] for c in flush_cards], reverse=True)
+        # Check straight again on flush cards
+        sf_high = 0
+        f_unique = sorted(list(set(f_ranks)), reverse=True)
+        if {14, 5, 4, 3, 2}.issubset(set(f_unique)): sf_high = 5
+        for i in range(len(f_unique) - 4):
+            if f_unique[i] - f_unique[i+4] == 4:
+                sf_high = f_unique[i]
+                break
+
+        if sf_high > 0: return 800 + sf_high, "Straight Flush"
+
+    # 2. Four of a Kind
+    if quads: return 700 + quads[0], "Four of a Kind"
+
+    # 3. Full House
+    if trips and pairs: return 600 + trips[0], "Full House"
+    if len(trips) >= 2: return 600 + trips[0], "Full House" # Two trips > Full House
+
+    # 4. Flush
+    if is_flush: return 500 + ranks[0], "Flush"
+
+    # 5. Straight
+    if is_straight: return 400 + straight_high, "Straight"
+
+    # 6. Three of a Kind
+    if trips: return 300 + trips[0], "Three of a Kind"
+
+    # 7. Two Pair
+    if len(pairs) >= 2: return 200 + pairs[0], "Two Pair"
+
+    # 8. Pair
+    if pairs: return 100 + pairs[0], "Pair"
+
+    # 9. High Card
     return ranks[0], "High Card"
 
 class Casino(commands.Cog):
@@ -73,7 +146,14 @@ class Casino(commands.Cog):
         symbols = ["9️⃣", "🔟", "🇯", "🇶", "🇰", "🅰️", "🦌", "🦁", "🐺", "🦅", "🐃", "🪙", "🃏"]
 
         # Weights (Adjusted for RTP)
+        # Base: Low symbols high weight, High symbols low weight.
+        # RTP Modifier > 1.0 increases chance of High Symbols (Buffalo, Scatter, Wild)
         base_weights = [15, 15, 12, 12, 10, 10, 8, 7, 6, 5, 3, 2, 2]
+
+        if self.rtp_modifier != 1.0:
+            # Scale high paying symbols (indices 9-12)
+            for i in range(9, 13):
+                base_weights[i] = int(base_weights[i] * self.rtp_modifier)
 
         if has_luck:
             base_weights[10] += 2 # Buffalo
@@ -89,31 +169,6 @@ class Casino(commands.Cog):
         embed.add_field(name="Wager", value=f"{wager} 🪙")
         msg = await ctx.send(embed=embed)
 
-        # Rolling animation (Simulate reels stopping L->R)
-        final_grid = []
-        for col_stop in range(cols + 1):
-            grid_disp = []
-            current_grid = []
-
-            # Generate full grid, but lock cols < col_stop
-            for r in range(rows):
-                row_syms = []
-                for c in range(cols):
-                    if c < col_stop:
-                        # Use final symbol if determined
-                        if len(final_grid) > r:
-                            row_syms.append(final_grid[r][c])
-                        else:
-                            # If we haven't generated final grid yet?
-                            # We generate final grid at start but reveal it.
-                            pass
-                    else:
-                        # Spinning symbol
-                        row_syms.append("💨")
-                # This logic is tricky. Let's generate final grid first.
-                pass
-
-        # Correct Animation Logic:
         # Generate Final Grid First
         final_grid = []
         for _ in range(rows):
@@ -131,7 +186,7 @@ class Casino(commands.Cog):
                     else:
                         line.append("🔄") # Spinning
                 display_lines.append(" ".join(line))
-
+            display_lines.append(f"**Potential Win: {wager * 10}+**") # Interactive element
             embed.description = "\n".join(display_lines)
             await msg.edit(embed=embed)
             await asyncio.sleep(0.5)
@@ -160,18 +215,17 @@ class Casino(commands.Cog):
             bonus_val = int(wager * free_spins * 0.5)
             total_payout += bonus_val
 
-        # Check Paylines (Simplified: Check each unique symbol on Reel 1)
-        reel1_syms = set([final_grid[r][0] for r in range(rows)])
-        if "🃏" in reel1_syms: reel1_syms = set(symbols) # Wild starts everything? Too OP.
-        # Wild on Reel 1 acts as Wild.
+        # Identify candidate symbols to check for wins (Reel 1 symbols + Wild logic)
+        candidates = set()
+        for r in range(rows):
+            s = final_grid[r][0]
+            if s == "🃏":
+                candidates.update(symbols) # Wild on Reel 1 starts chains for ANY symbol
+            else:
+                candidates.add(s)
 
-        # Let's iterate unique symbols present on Reel 1
-        checked_syms = set()
-
-        for start_r in range(rows):
-            sym = final_grid[start_r][0]
-            if sym in checked_syms or sym == "🪙": continue
-
+        for sym in candidates:
+            if sym == "🪙" or sym == "🃏": continue # Scatters handled, Wilds handled as sub
             # Count consecutive reels with this symbol (or Wild)
             length = 1
             for c in range(1, cols):
@@ -191,7 +245,6 @@ class Casino(commands.Cog):
                 win = int(wager * mult * scale[length])
                 total_payout += win
                 winning_lines.append(f"{length}x {sym} (+{win})")
-                checked_syms.add(sym)
 
         # Update Balance
         if total_payout > 0:
@@ -325,14 +378,15 @@ class PlayAgainView(View):
     @discord.ui.button(label="Play Again", style=discord.ButtonStyle.primary, emoji="🔄")
     async def play_again(self, interaction, button):
         if interaction.user != self.ctx.author: return
-        cog = self.bot.get_cog("Casino")
-        # Direct call to method (ensure Context is reused or new interaction used)
-        # Using interaction to respond is better if possible, but cog methods expect Context.
-        # We can pass self.ctx.
         self.stop()
-        if self.game_type == "slots": await cog.slots(self.ctx, self.wager)
-        elif self.game_type == "blackjack": await cog.blackjack(self.ctx, self.wager)
-        elif self.game_type == "highlow": await cog.highlow(self.ctx, self.wager)
+
+        # Create new context from button interaction to prevent expired token issues
+        ctx = await self.bot.get_context(interaction)
+        cog = self.bot.get_cog("Casino")
+
+        if self.game_type == "slots": await cog.slots.callback(cog, ctx, self.wager)
+        elif self.game_type == "blackjack": await cog.blackjack.callback(cog, ctx, self.wager)
+        elif self.game_type == "highlow": await cog.highlow.callback(cog, ctx, self.wager)
 
 class BlackjackGame:
     def __init__(self, ctx, wager, economy):

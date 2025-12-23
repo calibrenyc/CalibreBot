@@ -390,10 +390,11 @@ class Sportsbook(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.app_commands.command(name="allbets", description="View all active bets (Admin Only)")
+    @commands.has_permissions(administrator=True)
     async def allbets(self, interaction: discord.Interaction):
         # Admin Check
-        from bot import is_admin_or_mod
-        if not await is_admin_or_mod(interaction):
+        # Use discord.py built-in check or simple permission check
+        if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
 
@@ -431,9 +432,9 @@ class Sportsbook(commands.Cog):
 
     # --- ADMIN: Force Refresh Odds ---
     @discord.app_commands.command(name="refresh_odds", description="Manually fetch latest odds from API (Admin Only)")
+    @commands.has_permissions(administrator=True)
     async def refresh_odds(self, interaction: discord.Interaction):
-        from bot import is_admin_or_mod
-        if not await is_admin_or_mod(interaction):
+        if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("Admin only.", ephemeral=True)
 
         await interaction.response.defer()
@@ -445,9 +446,9 @@ class Sportsbook(commands.Cog):
 
     # --- ADMIN: Settle Bets Manually ---
     @discord.app_commands.command(name="settle_bets", description="Manually settle pending bets (Admin Only)")
+    @commands.has_permissions(administrator=True)
     async def settle_bets(self, interaction: discord.Interaction):
-        from bot import is_admin_or_mod
-        if not await is_admin_or_mod(interaction):
+        if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("Admin only.", ephemeral=True)
 
         await interaction.response.defer()

@@ -21,9 +21,10 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.4.2"
+BOT_VERSION = "2.4.3"
 
 CHANGELOG = {
+    "2.4.3": "🔧 **Casino Fixes (v2.4.3)**\n- **Slots**: Fixed payout logic for Wilds and improved animations.\n- **Shop**: Added 'Lucky Charm' item to shop.\n- **System**: Fixed 'Play Again' button crashes.",
     "2.4.2": "🎰 **Casino Visuals & Mechanics (v2.4.2)**\n- **Slots**: New 5x4 Grid, Stake-style animations, Scatter Free Spins, and Wilds.\n- **Visuals**: Large Emoji Cards for Blackjack/Poker.\n- **Mechanics**: Improved Poker & Crash logic.",
     "2.4.1": "🔧 **Inventory Fix (v2.4.1)**\n- Added `/inventory` and `/shop buy` logic for items.\n- Slots now checks for 'Lucky Charm'.",
     "2.4.0": "🎰 **Casino Overhaul (v2.4.0)**\n- **Slots**: New Buffalo style slots with animations and free spin bonus.\n- **Poker**: Added `/poker` (vs Dealer) and `/pvppoker` (Multiplayer Shootout).\n- **Crash**: Added `/crash` (Ride the Line).\n- **Visuals**: Enhanced Blackjack & High/Low with emoji cards.\n- **Economy**: Added `/pay`.",

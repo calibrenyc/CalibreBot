@@ -189,6 +189,12 @@ class DatabaseManager:
                 )
             """)
 
+            # Seed Lucky Charm if missing (Fix for v2.4.3)
+            async with db.execute("SELECT 1 FROM shop_items WHERE name = 'Lucky Charm'") as cursor:
+                 if not await cursor.fetchone():
+                     await db.execute("INSERT INTO shop_items (name, price, role_id, description) VALUES (?, ?, ?, ?)",
+                                      ('Lucky Charm', 2500, 0, 'Increases luck in Casino games!'))
+
             # 8. Active Bets
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS active_bets (
