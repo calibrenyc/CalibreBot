@@ -229,9 +229,22 @@ class TCFC(commands.Cog):
                     won = True
 
                 if won:
-                    await econ.update_balance(bet['user_id'], bet['wager'] * 2) # Placeholder
+                    # Calculate Dynamic Payout based on stored Odds (American format)
+                    # If bet doesn't store odds (legacy?), fallback to even money (2.0)
+                    odds = bet['odds'] if 'odds' in bet.keys() and bet['odds'] else 100
+                    wager = bet['wager']
+
+                    payout = 0
+                    if odds > 0:
+                        profit = wager * (odds / 100)
+                    else:
+                        profit = wager / (abs(odds) / 100)
+
+                    payout = int(wager + profit)
+
+                    await econ.update_balance(bet['user_id'], payout)
                     payout_count += 1
-                    await db.execute("UPDATE tcfc_bets SET status = 'WON' WHERE id = ?", (bet['id'],))
+                    await db.execute("UPDATE tcfc_bets SET status = 'WON', potential_payout = ? WHERE id = ?", (payout, bet['id']))
                 else:
                     await db.execute("UPDATE tcfc_bets SET status = 'LOST' WHERE id = ?", (bet['id'],))
 
@@ -414,34 +427,58 @@ class FighterSelectView(View):
     def create_btn(self, fighter_id, label):
         btn = Button(label=f"Fighter {fighter_id}", style=discord.ButtonStyle.secondary)
         async def cb(interaction):
-            await interaction.response.send_modal(WagerModalTCFC(self.match['id'], fighter_id, self.bot))
+            # Calculate Odds on the fly for the modal
+            f1 = await self.cog.get_fighter(self.match['fighter_a'])
+            f2 = await self.cog.get_fighter(self.match['fighter_b'])
+            elo1 = f1['elo'] if f1 else 1000
+            elo2 = f2['elo'] if f2 else 1000
+            odds1, odds2 = self.cog.calculate_odds(elo1, elo2)
+
+            # Determine which odds apply to this button
+            my_odds = odds1 if fighter_id == self.match['fighter_a'] else odds2
+
+            await interaction.response.send_modal(WagerModalTCFC(self.match['id'], fighter_id, my_odds, self.bot))
         btn.callback = cb
         return btn
 
 class WagerModalTCFC(Modal):
-    def __init__(self, match_id, selection, bot):
+    def __init__(self, match_id, selection, odds, bot):
         super().__init__(title="Place Bet")
         self.match_id = match_id
         self.selection = selection
+        self.odds = odds
         self.bot = bot
-        self.amount = TextInput(label="Amount")
+        self.amount = TextInput(label=f"Amount (Odds: {odds})")
         self.add_item(self.amount)
 
     async def on_submit(self, interaction):
         try:
             amt = int(self.amount.value)
+            if amt <= 0: raise ValueError
         except:
             return await interaction.response.send_message("Invalid amount.", ephemeral=True)
 
         econ = self.bot.get_cog("Economy")
+        bal = await econ.get_balance(interaction.user.id)
+        if bal < amt: return await interaction.response.send_message(f"Insufficient funds. ({bal})", ephemeral=True)
+
         await econ.update_balance(interaction.user.id, -amt)
 
+        # Calculate Potential Payout
+        if self.odds > 0:
+            profit = amt * (self.odds / 100)
+        else:
+            profit = amt / (abs(self.odds) / 100)
+        potential = int(amt + profit)
+
         async with aiosqlite.connect("bot_data.db") as db:
-            await db.execute("INSERT INTO tcfc_bets (user_id, match_id, bet_type, selection, wager, status) VALUES (?, ?, 'WINNER', ?, ?, 'PENDING')",
-                             (interaction.user.id, self.match_id, self.selection, amt))
+            await db.execute("""
+                INSERT INTO tcfc_bets (user_id, match_id, bet_type, selection, wager, odds, potential_payout, status)
+                VALUES (?, ?, 'WINNER', ?, ?, ?, ?, 'PENDING')
+            """, (interaction.user.id, self.match_id, self.selection, amt, self.odds, potential))
             await db.commit()
 
-        await interaction.response.send_message(f"Bet {amt} on Fighter {self.selection}", ephemeral=True)
+        await interaction.response.send_message(f"✅ Bet {amt} on Fighter {self.selection} (Odds: {self.odds}).\nPotential Payout: {potential}", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(TCFC(bot))

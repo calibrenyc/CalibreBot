@@ -162,16 +162,51 @@ class Economy(commands.Cog):
         bal = await self.get_balance(ctx.author.id)
         if bal < item['price']: return await ctx.send("Insufficient funds.")
 
-        role = ctx.guild.get_role(item['role_id'])
-        if not role: return await ctx.send("Role associated with this item no longer exists.")
+        role_id = item['role_id']
+        role = ctx.guild.get_role(role_id) if role_id else None
+
+        # Logic for Inventory Items (No Role)
+        # If role_id is 0 or None, it's a pure inventory item (e.g. Lucky Charm)
+        is_inventory_item = (role_id == 0 or role_id is None)
+
+        if not is_inventory_item and not role:
+             return await ctx.send("Role associated with this item no longer exists.")
 
         await self.update_balance(ctx.author.id, -item['price'])
+
         try:
-            await ctx.author.add_roles(role, reason="Bought from shop")
-            await ctx.send(f"You bought **{item['name']}** and received the {role.name} role!")
-        except:
+            if role:
+                await ctx.author.add_roles(role, reason="Bought from shop")
+
+            # Add to Inventory DB
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("INSERT INTO inventory (user_id, guild_id, item_name) VALUES (?, ?, ?)",
+                                 (ctx.author.id, ctx.guild.id, item['name']))
+                await db.commit()
+
+            msg = f"You bought **{item['name']}**!"
+            if role: msg += f" Received role {role.name}."
+            await ctx.send(msg)
+
+        except Exception as e:
             await self.update_balance(ctx.author.id, item['price']) # Refund
-            await ctx.send("Failed to assign role (I might lack permissions). Refunded.")
+            await ctx.send(f"Transaction failed: {e}. Refunded.")
+
+    @commands.hybrid_command(name="inventory", description="Check your inventory items")
+    async def inventory(self, ctx):
+        async with aiosqlite.connect("bot_data.db") as db:
+            async with db.execute("SELECT item_name, count(*) FROM inventory WHERE user_id = ? GROUP BY item_name", (ctx.author.id,)) as cursor:
+                rows = await cursor.fetchall()
+
+        if not rows:
+            return await ctx.send("Your inventory is empty.", ephemeral=True)
+
+        embed = discord.Embed(title=f"{ctx.author.display_name}'s Inventory", color=discord.Color.blue())
+        desc = ""
+        for name, count in rows:
+            desc += f"**{name}**: x{count}\n"
+        embed.description = desc
+        await ctx.send(embed=embed)
 
     @shop.command(name="add", description="Add an item to the shop (Admin)")
     @commands.has_permissions(administrator=True)

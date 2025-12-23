@@ -19,11 +19,6 @@ class ConfirmationView(View):
 
     @discord.ui.button(label="Confirm Bet", style=discord.ButtonStyle.green, emoji="✅")
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.modal.interaction_view.interaction.user: # Wait, how to get original user?
-            # modal.interaction_view is the BettingView which doesn't store user.
-            # But the modal interaction itself has the user.
-            pass
-
         # We need to ensure the person clicking is the one who opened the modal.
         # But wait, send_modal is an interaction response. The ConfirmationView is sent as a followup to that interaction?
         # Yes.
