@@ -145,9 +145,21 @@ class Economy(commands.Cog):
 
         embed = discord.Embed(title="Server Shop", color=discord.Color.gold())
         for item in items:
-            role = ctx.guild.get_role(item['role_id'])
-            role_name = role.name if role else "Deleted Role"
-            embed.add_field(name=f"{item['name']} - {item['price']} coins", value=f"Reward: {role_name}\n{item['description']}", inline=False)
+            itype = item['item_type'] if item['item_type'] else "ROLE"
+
+            reward_text = ""
+            if itype == "ROLE":
+                role = ctx.guild.get_role(item['role_id'])
+                role_name = role.name if role else "Deleted Role"
+                reward_text = f"Role: {role_name}"
+            elif itype == "LUCK":
+                reward_text = "Effect: Increases Casino Luck"
+            elif itype == "UNLOCK":
+                reward_text = "Effect: Unlocks Special Commands"
+            else:
+                reward_text = f"Type: {itype}"
+
+            embed.add_field(name=f"{item['name']} - {item['price']} coins", value=f"{reward_text}\n{item['description']}", inline=False)
         await ctx.send(embed=embed)
 
     @shop.command(name="buy", description="Buy an item from the shop")
@@ -209,13 +221,29 @@ class Economy(commands.Cog):
         await ctx.send(embed=embed)
 
     @shop.command(name="add", description="Add an item to the shop (Admin)")
+    @discord.app_commands.describe(
+        item_type="Type of item (ROLE, LUCK, UNLOCK)",
+        role="Role to reward (Required if type is ROLE)"
+    )
+    @discord.app_commands.choices(item_type=[
+        discord.app_commands.Choice(name="Role Reward", value="ROLE"),
+        discord.app_commands.Choice(name="Luck Boost", value="LUCK"),
+        discord.app_commands.Choice(name="Command Unlock", value="UNLOCK")
+    ])
     @commands.has_permissions(administrator=True)
-    async def shop_add(self, ctx, name: str, price: int, role: discord.Role, description: str = "No description"):
+    async def shop_add(self, ctx, name: str, price: int, item_type: discord.app_commands.Choice[str], role: discord.Role = None, description: str = "No description"):
+        type_val = item_type.value
+
+        if type_val == "ROLE" and not role:
+            return await ctx.send("You must provide a role for ROLE type items.", ephemeral=True)
+
+        role_id = role.id if role else 0
+
         async with aiosqlite.connect("bot_data.db") as db:
-            await db.execute("INSERT INTO shop_items (guild_id, name, price, role_id, description) VALUES (?, ?, ?, ?, ?)",
-                             (ctx.guild.id, name, price, role.id, description))
+            await db.execute("INSERT INTO shop_items (guild_id, name, price, role_id, description, item_type) VALUES (?, ?, ?, ?, ?, ?)",
+                             (ctx.guild.id, name, price, role_id, description, type_val))
             await db.commit()
-        await ctx.send(f"Added {name} to shop.")
+        await ctx.send(f"Added {name} ({type_val}) to shop.")
 
     # --- Custom Bets ---
     @commands.hybrid_group(name="bet", description="Betting system")
