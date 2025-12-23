@@ -291,6 +291,46 @@ class DatabaseManager:
                 )
             """)
 
+            # 13. Ladder System (v2.6)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ladders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER,
+                    name TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(guild_id, name)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ladder_players (
+                    ladder_id INTEGER,
+                    user_id INTEGER,
+                    elo INTEGER DEFAULT 1000,
+                    wins INTEGER DEFAULT 0,
+                    losses INTEGER DEFAULT 0,
+                    streak INTEGER DEFAULT 0,
+                    PRIMARY KEY (ladder_id, user_id),
+                    FOREIGN KEY(ladder_id) REFERENCES ladders(id) ON DELETE CASCADE
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ladder_matches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ladder_id INTEGER,
+                    p1_id INTEGER,
+                    p2_id INTEGER,
+                    status TEXT DEFAULT 'PENDING', -- PENDING, ACTIVE, REPORTED, CONFIRMED, DISPUTED
+                    winner_id INTEGER,
+                    wager INTEGER DEFAULT 0,
+                    p1_report INTEGER DEFAULT NULL, -- 1=Self Win, 2=Opponent Win
+                    p2_report INTEGER DEFAULT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(ladder_id) REFERENCES ladders(id) ON DELETE CASCADE
+                )
+            """)
+
             await db.commit()
 
     async def migrate_from_json(self):
