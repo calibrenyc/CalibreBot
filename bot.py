@@ -21,9 +21,10 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.5"
+BOT_VERSION = "2.5.1-hotfix"
 
 CHANGELOG = {
+    "2.5.1-hotfix": "🔥 **Hotfix (v2.5.1)**\n- **Shop**: Added `/shop remove` command for Admins.\n- **Versioning**: Bumped to hotfix release.",
     "2.5": "🏥 **Operation Health (v2.5)**\n- **PvP Wagers**: New `/wager` system replaces legacy bets. Secure escrow and voting resolution.\n- **Casino**: 'Lucky Charm' item now usable in `/slots` for boosted odds. Fixed `set_rtp` persistence.\n- **Leveling**: Added `/leveling reset` (Admin) and Level Up Channel configuration.\n- **Cleanup**: Removed log file clutter and optimized database schema.",
     "2.4.3": "🔧 **Casino Fixes (v2.4.3)**\n- **Slots**: Fixed payout logic for Wilds and improved animations.\n- **Shop**: Added 'Lucky Charm' item to shop.\n- **System**: Fixed 'Play Again' button crashes.",
     "2.4.2": "🎰 **Casino Visuals & Mechanics (v2.4.2)**\n- **Slots**: New 5x4 Grid, Stake-style animations, Scatter Free Spins, and Wilds.\n- **Visuals**: Large Emoji Cards for Blackjack/Poker.\n- **Mechanics**: Improved Poker & Crash logic.",
