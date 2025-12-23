@@ -1,3 +1,29 @@
+# Calibre Search Bot - Version 2.5 Release Notes
+
+**Version 2.5 (Operation Health)** focuses on cleaning up technical debt, fixing bugs, and revamping core systems for better stability and user experience.
+
+## 🏥 Operation Health Updates
+
+### ⚔️ Economy & PvP Wagers
+*   **Revamped Betting:** Replaced the old betting system with a robust **PvP Wager System** (`/wager`).
+    *   **Challenge:** `/wager challenge <user> <amount>` - Funds are securely escrowed.
+    *   **Secure:** Opponents must Accept/Decline via buttons.
+    *   **Resolution:** Both players vote on the winner (`/wager resolve`). If votes mismatch, the bet is voided and funds returned.
+
+### 🎰 Casino Improvements
+*   **Lucky Charm Integration:** If you own a 'Lucky Charm' (from `/shop`), the Slot Machine (`/slots`) will now offer a special **"Spin with Luck"** button to consume the item for boosted odds!
+*   **RTP Persistence:** The `set_rtp` command for Admins is now persistent across bot restarts (saved to DB).
+
+### 📈 Leveling & Config
+*   **Rank Reset:** Admins can now reset XP for a specific user or the entire server using `/leveling reset`.
+*   **Level Up Channel:** You can now configure a specific channel for level-up notifications using `/config level_channel`, keeping general chat clean.
+
+### 🧹 System Cleanup
+*   **Log Files:** Removed clutter from local `.log` files; logging is now streamlined to console.
+*   **Database:** Optimized schema with new `global_config` and `pvp_bets` tables.
+
+---
+
 # Calibre Search Bot - Version 2.1.0 Release Notes
 
 **Version 2.1.0** is a massive update introducing persistent storage (SQLite), an economy system, leveling, advanced tracking, and birthdays!
