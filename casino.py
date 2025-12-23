@@ -106,6 +106,14 @@ class Casino(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.rtp_modifier = 1.0
+        self.bot.loop.create_task(self.load_rtp())
+
+    async def load_rtp(self):
+        async with aiosqlite.connect("bot_data.db") as db:
+            async with db.execute("SELECT value FROM global_config WHERE key = 'rtp_modifier'") as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    self.rtp_modifier = float(row[0])
 
     async def check_balance(self, user_id, amount):
         economy = self.bot.get_cog("Economy")
@@ -115,11 +123,20 @@ class Casino(commands.Cog):
         return True, bal
 
     # --- ADMIN: Set RTP ---
-    @commands.command(name="set_rtp", hidden=True)
+    @discord.app_commands.command(name="set_rtp", description="Set Global Slots RTP Modifier (Admin Only)")
     @commands.has_permissions(administrator=True)
-    async def set_rtp(self, ctx, value: float):
+    async def set_rtp(self, interaction: discord.Interaction, value: float):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Admin only.", ephemeral=True)
+
         self.rtp_modifier = value
-        await ctx.send(f"🎰 Global Slots RTP Modifier set to {value}")
+        async with aiosqlite.connect("bot_data.db") as db:
+            await db.execute("""
+                INSERT INTO global_config (key, value) VALUES ('rtp_modifier', ?)
+                ON CONFLICT(key) DO UPDATE SET value = ?
+            """, (str(value), str(value)))
+            await db.commit()
+        await interaction.response.send_message(f"🎰 Global Slots RTP Modifier set to {value}", ephemeral=True)
 
     # --- SLOTS (Buffalo Style - Enhanced) ---
     @commands.hybrid_command(name="slots", description="Play Buffalo Slots (Stake Style)")
@@ -128,14 +145,60 @@ class Casino(commands.Cog):
         ok, msg = await self.check_balance(ctx.author.id, wager)
         if not ok: return await ctx.send(msg, ephemeral=True)
 
-        econ = self.bot.get_cog("Economy")
-        await econ.update_balance(ctx.author.id, -wager)
-
-        # Luck Check
+        # Luck Check (Pre-deduction for decision)
         has_luck = False
         async with aiosqlite.connect("bot_data.db") as db:
             async with db.execute("SELECT 1 FROM inventory WHERE user_id = ? AND item_name = 'Lucky Charm'", (ctx.author.id,)) as cursor:
                 if await cursor.fetchone(): has_luck = True
+
+        if has_luck:
+            # Ask user if they want to use luck
+            # Note: LuckChoiceView is defined below, ensure it's available or move it up.
+            # In Python, classes defined below are not available above unless inside a method
+            # that is called after definition.
+            # Since 'slots' is called via command dispatch, 'LuckChoiceView' will be defined by then.
+            # However, nested class scope is tricky if not module level.
+            # LuckChoiceView is module level (see end of file), so this works fine.
+            view = LuckChoiceView(ctx, wager, self)
+            msg = await ctx.send("🍀 **Lucky Charm Found!** Do you want to use it for this spin?", view=view)
+            # The view handles the rest
+        else:
+            # Proceed normally
+            await self.run_slots(ctx, wager, use_luck=False)
+
+    async def run_slots(self, ctx, wager, use_luck=False):
+        econ = self.bot.get_cog("Economy")
+        # Deduct Wager (if not already done - Wait, logic separation means we deduct here)
+        # We need to re-check balance if we are coming from a button click?
+        # Assuming PlayAgainView calls callback -> slots -> check -> logic.
+        # But wait, PlayAgainView calls callback.
+        # If we use LuckChoiceView, we need to handle the deduction inside run_slots.
+        # So we remove deduction from the `slots` command top-level if we branch.
+        # Actually `check_balance` returns `True/False` but doesn't deduct.
+        # So it's safe to deduct here.
+
+        # Re-check balance just in case
+        bal = await econ.get_balance(ctx.author.id)
+        if bal < wager:
+            return await ctx.send(f"Insufficient funds. You have {bal} coins.")
+
+        await econ.update_balance(ctx.author.id, -wager)
+
+        if use_luck:
+            # Consume 1 Lucky Charm
+            item_consumed = False
+            async with aiosqlite.connect("bot_data.db") as db:
+                # Find an entry and remove one
+                async with db.execute("SELECT id FROM inventory WHERE user_id = ? AND item_name = 'Lucky Charm' LIMIT 1", (ctx.author.id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row:
+                        await db.execute("DELETE FROM inventory WHERE id = ?", (row[0],))
+                        await db.commit()
+                        item_consumed = True
+
+            if not item_consumed:
+                use_luck = False
+                await ctx.send("⚠️ **Lucky Charm not found!** Spinning normally...", delete_after=5)
 
         # Symbols (Buffalo Theme)
         # 🐃 = Buffalo (High), 🦅 = Eagle, 🐺 = Wolf, 🦁 = Cougar, 🦌 = Moose
@@ -155,7 +218,7 @@ class Casino(commands.Cog):
             for i in range(9, 13):
                 base_weights[i] = int(base_weights[i] * self.rtp_modifier)
 
-        if has_luck:
+        if use_luck:
             base_weights[10] += 2 # Buffalo
             base_weights[11] += 1 # Scatter
             base_weights[12] += 1 # Wild
@@ -167,7 +230,14 @@ class Casino(commands.Cog):
         embed = discord.Embed(title="🎰 Buffalo Legends", color=discord.Color.gold())
         embed.description = "🎰 **SPINNING...**"
         embed.add_field(name="Wager", value=f"{wager} 🪙")
-        msg = await ctx.send(embed=embed)
+        if use_luck:
+            embed.set_footer(text="🍀 LUCK ADDED! Better odds active!")
+
+        if getattr(ctx, 'message_to_edit', None):
+             msg = getattr(ctx, 'message_to_edit')
+             await msg.edit(embed=embed, view=None) # Clear view
+        else:
+             msg = await ctx.send(embed=embed)
 
         # Generate Final Grid First
         final_grid = []
@@ -261,6 +331,30 @@ class Casino(commands.Cog):
 
         view = PlayAgainView(ctx, wager, "slots", self.bot)
         await msg.edit(embed=embed, view=view)
+
+class LuckChoiceView(View):
+    def __init__(self, ctx, wager, cog):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        self.wager = wager
+        self.cog = cog
+
+    @discord.ui.button(label="Spin with Luck (Consume 1 Charm)", style=discord.ButtonStyle.success, emoji="🍀")
+    async def use_luck(self, interaction, button):
+        if interaction.user != self.ctx.author: return
+        self.stop()
+        # Pass the message so we can edit it
+        self.ctx.message_to_edit = interaction.message
+        await interaction.response.defer()
+        await self.cog.run_slots(self.ctx, self.wager, use_luck=True)
+
+    @discord.ui.button(label="Spin Normal", style=discord.ButtonStyle.secondary, emoji="🔄")
+    async def normal(self, interaction, button):
+        if interaction.user != self.ctx.author: return
+        self.stop()
+        self.ctx.message_to_edit = interaction.message
+        await interaction.response.defer()
+        await self.cog.run_slots(self.ctx, self.wager, use_luck=False)
 
     # --- BLACKJACK ---
     @commands.hybrid_command(name="blackjack", description="Play Blackjack")

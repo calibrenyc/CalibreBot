@@ -340,3 +340,188 @@ class Economy(commands.Cog):
         await self.update_balance(user.id, amount)
 
         await ctx.send(f"💸 {ctx.author.mention} paid {amount} coins to {user.mention}!")
+
+    # --- PvP Wagers (New v2.3) ---
+    @commands.hybrid_group(name="wager", description="Player vs Player Betting")
+    async def wager(self, ctx):
+        pass
+
+    @wager.command(name="challenge", description="Challenge a user to a wager")
+    async def wager_challenge(self, ctx, opponent: discord.Member, amount: int):
+        if opponent.bot or opponent.id == ctx.author.id:
+            return await ctx.send("Invalid opponent.", ephemeral=True)
+        if amount <= 0:
+            return await ctx.send("Amount must be positive.", ephemeral=True)
+
+        # Check Challenger Balance
+        bal = await self.get_balance(ctx.author.id)
+        if bal < amount:
+            return await ctx.send(f"Insufficient funds. You have {bal} coins.", ephemeral=True)
+
+        # Create Pending Bet in DB
+        # We put Challenger's money in escrow NOW?
+        # Plan says "Amount is deducted from A (Escrow)".
+        await self.update_balance(ctx.author.id, -amount)
+
+        async with aiosqlite.connect("bot_data.db") as db:
+            cursor = await db.execute("""
+                INSERT INTO pvp_bets (guild_id, challenger_id, opponent_id, amount, status)
+                VALUES (?, ?, ?, ?, 'PENDING')
+            """, (ctx.guild.id, ctx.author.id, opponent.id, amount))
+            bet_id = cursor.lastrowid
+            await db.commit()
+
+        # Send Challenge
+        embed = discord.Embed(title="⚔️ Wager Challenge", description=f"{ctx.author.mention} challenges {opponent.mention} to a wager of **{amount}** coins!", color=discord.Color.red())
+        view = WagerAcceptView(bet_id, opponent.id, amount, ctx.author.id)
+        await ctx.send(f"{opponent.mention}", embed=embed, view=view)
+
+    @wager.command(name="resolve", description="Resolve an active wager")
+    async def wager_resolve(self, ctx):
+        # Find active bets for this user
+        async with aiosqlite.connect("bot_data.db") as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT * FROM pvp_bets
+                WHERE (challenger_id = ? OR opponent_id = ?) AND status = 'ACTIVE'
+            """, (ctx.author.id, ctx.author.id)) as cursor:
+                bets = await cursor.fetchall()
+
+        if not bets:
+            return await ctx.send("You have no active wagers.", ephemeral=True)
+
+        # If multiple, maybe ask which one? For now, list them or handle first.
+        # User requested "player 1 proposes... player 2 accepts... locked in until both players select winner".
+        # Let's show a dropdown if multiple, or just the first one.
+        # Let's use a View to let them pick the winner.
+
+        embed = discord.Embed(title="Active Wagers", color=discord.Color.blue())
+        for bet in bets:
+            opp_id = bet['opponent_id'] if bet['challenger_id'] == ctx.author.id else bet['challenger_id']
+            opp = ctx.guild.get_member(opp_id)
+            opp_name = opp.display_name if opp else "Unknown"
+
+            embed.add_field(name=f"Bet #{bet['id']} vs {opp_name}", value=f"Amount: {bet['amount']}", inline=False)
+
+            # Send a view for THIS bet immediately?
+            # Or just one view for the first one found?
+            # Let's send a resolution view for the first found bet for simplicity, or loops.
+            view = WagerResolveView(bet['id'], bet['challenger_id'], bet['opponent_id'], bet['amount'])
+            await ctx.send(f"Resolve Wager #{bet['id']} vs {opp_name}", view=view)
+
+from discord.ui import View, Button
+
+class WagerAcceptView(View):
+    def __init__(self, bet_id, opponent_id, amount, challenger_id):
+        super().__init__(timeout=300)
+        self.bet_id = bet_id
+        self.opponent_id = opponent_id
+        self.amount = amount
+        self.challenger_id = challenger_id
+
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.green)
+    async def accept(self, interaction, button):
+        if interaction.user.id != self.opponent_id:
+            return await interaction.response.send_message("Not your challenge.", ephemeral=True)
+
+        # Check Opponent Balance
+        econ = interaction.client.get_cog("Economy")
+        bal = await econ.get_balance(self.opponent_id)
+        if bal < self.amount:
+            return await interaction.response.send_message("Insufficient funds to accept.", ephemeral=True)
+
+        await econ.update_balance(self.opponent_id, -self.amount)
+
+        async with aiosqlite.connect("bot_data.db") as db:
+            await db.execute("UPDATE pvp_bets SET status = 'ACTIVE' WHERE id = ?", (self.bet_id,))
+            await db.commit()
+
+        embed = discord.Embed(title="⚔️ Wager Accepted!", description=f"Bet #{self.bet_id} is LIVE! Pot: {self.amount * 2}\nUse `/wager resolve` to declare the winner.", color=discord.Color.green())
+        await interaction.response.edit_message(embed=embed, view=None)
+        self.stop()
+
+    @discord.ui.button(label="Decline", style=discord.ButtonStyle.red)
+    async def decline(self, interaction, button):
+        if interaction.user.id != self.opponent_id and interaction.user.id != self.challenger_id:
+            return await interaction.response.send_message("Not your challenge.", ephemeral=True)
+
+        # Refund Challenger
+        econ = interaction.client.get_cog("Economy")
+        await econ.update_balance(self.challenger_id, self.amount)
+
+        async with aiosqlite.connect("bot_data.db") as db:
+            await db.execute("DELETE FROM pvp_bets WHERE id = ?", (self.bet_id,))
+            await db.commit()
+
+        await interaction.response.edit_message(content="Wager declined/cancelled. Refunded.", embed=None, view=None)
+        self.stop()
+
+class WagerResolveView(View):
+    def __init__(self, bet_id, challenger_id, opponent_id, amount):
+        super().__init__(timeout=None) # Persistent-ish
+        self.bet_id = bet_id
+        self.c_id = challenger_id
+        self.o_id = opponent_id
+        self.amount = amount
+
+    async def register_vote(self, interaction, voter_id, winner_id):
+        col = "challenger_vote" if voter_id == self.c_id else "opponent_vote"
+
+        async with aiosqlite.connect("bot_data.db") as db:
+            await db.execute(f"UPDATE pvp_bets SET {col} = ? WHERE id = ?", (winner_id, self.bet_id))
+            await db.commit()
+
+            # Check if both voted
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM pvp_bets WHERE id = ?", (self.bet_id,)) as cursor:
+                bet = await cursor.fetchone()
+
+        if bet['challenger_vote'] is not None and bet['opponent_vote'] is not None:
+            # Resolution
+            econ = interaction.client.get_cog("Economy")
+
+            if bet['challenger_vote'] == bet['opponent_vote']:
+                # Match
+                winner_id = bet['challenger_vote']
+                pot = self.amount * 2
+                await econ.update_balance(winner_id, pot)
+
+                async with aiosqlite.connect("bot_data.db") as db:
+                    await db.execute("UPDATE pvp_bets SET status = 'RESOLVED', winner_id = ? WHERE id = ?", (winner_id, self.bet_id))
+                    await db.commit()
+
+                winner = interaction.guild.get_member(winner_id)
+                await interaction.channel.send(f"🏆 **Wager #{self.bet_id} Resolved!**\nWinner: {winner.mention if winner else winner_id}\nPayout: {pot} coins!")
+
+            else:
+                # Mismatch -> Void
+                await econ.update_balance(self.c_id, self.amount)
+                await econ.update_balance(self.o_id, self.amount)
+
+                async with aiosqlite.connect("bot_data.db") as db:
+                    await db.execute("UPDATE pvp_bets SET status = 'VOID' WHERE id = ?", (self.bet_id,))
+                    await db.commit()
+
+                await interaction.channel.send(f"❌ **Wager #{self.bet_id} Dispute!**\nPlayers selected different winners.\nBet VOIDED and refunded.")
+
+            # Disable view
+            self.stop()
+            # If we could, we would disable buttons on the message, but we might not have the message obj here easily without storing it or using interactions.
+            # We can try editing the interaction response if it's the last one.
+            try:
+                await interaction.response.edit_message(content="Wager Resolved.", view=None)
+            except:
+                pass
+        else:
+            await interaction.response.send_message(f"Vote recorded. Waiting for opponent...", ephemeral=True)
+
+    @discord.ui.button(label="I Won", style=discord.ButtonStyle.primary)
+    async def i_won(self, interaction, button):
+        if interaction.user.id not in [self.c_id, self.o_id]: return
+        await self.register_vote(interaction, interaction.user.id, interaction.user.id)
+
+    @discord.ui.button(label="Opponent Won", style=discord.ButtonStyle.secondary)
+    async def opp_won(self, interaction, button):
+        if interaction.user.id not in [self.c_id, self.o_id]: return
+        winner = self.o_id if interaction.user.id == self.c_id else self.c_id
+        await self.register_vote(interaction, interaction.user.id, winner)
