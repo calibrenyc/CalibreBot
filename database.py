@@ -183,6 +183,10 @@ class DatabaseManager:
                 )
             """)
 
+            try:
+                await db.execute("ALTER TABLE shop_items ADD COLUMN item_type TEXT DEFAULT 'ROLE'")
+            except Exception: pass
+
             # 7. User Inventory (Added v2.4.1)
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS inventory (
@@ -197,8 +201,19 @@ class DatabaseManager:
             # Seed Lucky Charm if missing (Fix for v2.4.3)
             async with db.execute("SELECT 1 FROM shop_items WHERE name = 'Lucky Charm'") as cursor:
                  if not await cursor.fetchone():
-                     await db.execute("INSERT INTO shop_items (name, price, role_id, description) VALUES (?, ?, ?, ?)",
-                                      ('Lucky Charm', 2500, 0, 'Increases luck in Casino games!'))
+                     await db.execute("INSERT INTO shop_items (name, price, role_id, description, item_type) VALUES (?, ?, ?, ?, ?)",
+                                      ('Lucky Charm', 2500, 0, 'Increases luck in Casino games!', 'LUCK'))
+                 else:
+                     # Update type if exists (Migration)
+                     await db.execute("UPDATE shop_items SET item_type = 'LUCK' WHERE name = 'Lucky Charm'")
+
+            # Seed Auto Slot
+            async with db.execute("SELECT 1 FROM shop_items WHERE name = 'Auto Slot'") as cursor:
+                 if not await cursor.fetchone():
+                     await db.execute("INSERT INTO shop_items (name, price, role_id, description, item_type) VALUES (?, ?, ?, ?, ?)",
+                                      ('Auto Slot', 5000, 0, 'Unlocks /autoslots command for rapid spinning.', 'UNLOCK'))
+                 else:
+                     await db.execute("UPDATE shop_items SET item_type = 'UNLOCK' WHERE name = 'Auto Slot'")
 
             # 8. Active Bets
             await db.execute("""

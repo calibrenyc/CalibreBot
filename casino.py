@@ -192,137 +192,51 @@ class Casino(commands.Cog):
             # Proceed normally
             await self.run_slots(ctx, wager, use_luck=False)
 
-    async def run_slots(self, ctx, wager, use_luck=False):
-        econ = self.bot.get_cog("Economy")
-        # Deduct Wager (if not already done - Wait, logic separation means we deduct here)
-        # We need to re-check balance if we are coming from a button click?
-        # Assuming PlayAgainView calls callback -> slots -> check -> logic.
-        # But wait, PlayAgainView calls callback.
-        # If we use LuckChoiceView, we need to handle the deduction inside run_slots.
-        # So we remove deduction from the `slots` command top-level if we branch.
-        # Actually `check_balance` returns `True/False` but doesn't deduct.
-        # So it's safe to deduct here.
-
-        # Re-check balance just in case
-        bal = await econ.get_balance(ctx.author.id)
-        if bal < wager:
-            return await ctx.send(f"Insufficient funds. You have {bal} coins.")
-
-        await econ.update_balance(ctx.author.id, -wager)
-
-        if use_luck:
-            # Consume 1 Lucky Charm
-            item_consumed = False
-            async with aiosqlite.connect("bot_data.db") as db:
-                # Find an entry and remove one
-                async with db.execute("SELECT id FROM inventory WHERE user_id = ? AND item_name = 'Lucky Charm' LIMIT 1", (ctx.author.id,)) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        await db.execute("DELETE FROM inventory WHERE id = ?", (row[0],))
-                        await db.commit()
-                        item_consumed = True
-
-            if not item_consumed:
-                use_luck = False
-                await ctx.send("⚠️ **Lucky Charm not found!** Spinning normally...", delete_after=5)
-
+    def calculate_slot_result(self, wager, rtp_modifier, use_luck):
         # Symbols (Buffalo Theme)
-        # 🐃 = Buffalo (High), 🦅 = Eagle, 🐺 = Wolf, 🦁 = Cougar, 🦌 = Moose
-        # 🅰️, 🇰, 🇶, 🇯, 🔟, 9️⃣ = Low
-        # 🪙 = Scatter
-        # 🃏 = Wild
-
         symbols = ["9️⃣", "🔟", "🇯", "🇶", "🇰", "🅰️", "🦌", "🦁", "🐺", "🦅", "🐃", "🪙", "🃏"]
 
-        # Weights (Adjusted for RTP)
-        # Base: Low symbols high weight, High symbols low weight.
-        # RTP Modifier > 1.0 increases chance of High Symbols (Buffalo, Scatter, Wild)
+        # Weights
         base_weights = [15, 15, 12, 12, 10, 10, 8, 7, 6, 5, 3, 2, 2]
 
-        if self.rtp_modifier != 1.0:
-            # Scale high paying symbols (indices 9-12)
+        if rtp_modifier != 1.0:
             for i in range(9, 13):
-                base_weights[i] = int(base_weights[i] * self.rtp_modifier)
+                base_weights[i] = int(base_weights[i] * rtp_modifier)
 
         if use_luck:
             base_weights[10] += 2 # Buffalo
             base_weights[11] += 1 # Scatter
             base_weights[12] += 1 # Wild
 
-        # 5 Reels x 4 Rows (Stake Style Layout)
+        print(f"DEBUG: Slot Spin - Luck: {use_luck}, RTP: {rtp_modifier}, Weights: {base_weights}")
+
         rows, cols = 4, 5
-
-        # --- ANIMATION ---
-        embed = discord.Embed(title="🎰 Buffalo Legends", color=discord.Color.gold())
-        embed.description = "🎰 **SPINNING...**"
-        embed.add_field(name="Wager", value=f"{wager} 🪙")
-        if use_luck:
-            embed.set_footer(text="🍀 LUCK ADDED! Better odds active!")
-
-        if getattr(ctx, 'message_to_edit', None):
-             msg = getattr(ctx, 'message_to_edit')
-             await msg.edit(embed=embed, view=None) # Clear view
-        else:
-             msg = await ctx.send(embed=embed)
-
-        # Generate Final Grid First
         final_grid = []
         for _ in range(rows):
             row = random.choices(symbols, weights=base_weights, k=cols)
             final_grid.append(row)
 
-        # Animate: Show columns stopping 1 by 1
-        for i in range(cols + 1):
-            display_lines = []
-            for r in range(rows):
-                line = []
-                for c in range(cols):
-                    if c < i:
-                        line.append(final_grid[r][c])
-                    else:
-                        line.append("🔄") # Spinning
-                display_lines.append(" ".join(line))
-            display_lines.append(f"**Potential Win: {wager * 10}+**") # Interactive element
-            embed.description = "\n".join(display_lines)
-            await msg.edit(embed=embed)
-            await asyncio.sleep(0.5)
-
-        # --- EVALUATION ---
         total_payout = 0
         winning_lines = []
+        pay_table = {"9️⃣": 0.2, "🔟": 0.2, "🇯": 0.3, "🇶": 0.3, "🇰": 0.4, "🅰️": 0.4, "🦌": 0.5, "🦁": 0.8, "🐺": 1.0, "🦅": 2.0, "🐃": 5.0}
 
-        # Payouts (Simplified Stake "Ways" logic - Adjacent symbols L->R)
-        # We check symbol counts on first 3, 4, 5 reels.
-        # Wild (🃏) substitutes.
-
-        pay_table = {
-            "9️⃣": 0.2, "🔟": 0.2, "🇯": 0.3, "🇶": 0.3, "🇰": 0.4, "🅰️": 0.4,
-            "🦌": 0.5, "🦁": 0.8, "🐺": 1.0, "🦅": 2.0, "🐃": 5.0
-        }
-
-        # Check Scatters (Anywhere)
+        # Scatters
         flat_grid = [s for r in final_grid for s in r]
         scatters = flat_grid.count("🪙")
-        free_spins = 0
         if scatters >= 3:
-            free_spins = 8 + ((scatters - 3) * 2) # 8, 10, 12...
+            free_spins = 8 + ((scatters - 3) * 2)
             winning_lines.append(f"🔥 **{scatters} Scatters! {free_spins} FREE SPINS!**")
-            # Bonus Cash Value
-            bonus_val = int(wager * free_spins * 0.5)
-            total_payout += bonus_val
+            total_payout += int(wager * free_spins * 0.5)
 
-        # Identify candidate symbols to check for wins (Reel 1 symbols + Wild logic)
+        # Winning Lines
         candidates = set()
         for r in range(rows):
             s = final_grid[r][0]
-            if s == "🃏":
-                candidates.update(symbols) # Wild on Reel 1 starts chains for ANY symbol
-            else:
-                candidates.add(s)
+            if s == "🃏": candidates.update(symbols)
+            else: candidates.add(s)
 
         for sym in candidates:
-            if sym == "🪙" or sym == "🃏": continue # Scatters handled, Wilds handled as sub
-            # Count consecutive reels with this symbol (or Wild)
+            if sym == "🪙" or sym == "🃏": continue
             length = 1
             for c in range(1, cols):
                 col_has = False
@@ -336,13 +250,65 @@ class Casino(commands.Cog):
 
             if length >= 3:
                 mult = pay_table.get(sym, 0)
-                # Multiplier scales with length: 3x=1, 4x=2, 5x=5
                 scale = {3: 1, 4: 2.5, 5: 10}
                 win = int(wager * mult * scale[length])
                 total_payout += win
                 winning_lines.append(f"{length}x {sym} (+{win})")
 
-        # Update Balance
+        return total_payout, winning_lines, final_grid
+
+    async def run_slots(self, ctx, wager, use_luck=False):
+        econ = self.bot.get_cog("Economy")
+        bal = await econ.get_balance(ctx.author.id)
+        if bal < wager:
+            return await ctx.send(f"Insufficient funds. You have {bal} coins.")
+
+        await econ.update_balance(ctx.author.id, -wager)
+
+        if use_luck:
+            item_consumed = False
+            async with aiosqlite.connect("bot_data.db") as db:
+                async with db.execute("SELECT id FROM inventory WHERE user_id = ? AND item_name = 'Lucky Charm' LIMIT 1", (ctx.author.id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row:
+                        await db.execute("DELETE FROM inventory WHERE id = ?", (row[0],))
+                        await db.commit()
+                        item_consumed = True
+
+            if not item_consumed:
+                use_luck = False
+                await ctx.send("⚠️ **Lucky Charm not found!** Spinning normally...", delete_after=5)
+
+        # Generate Result
+        total_payout, winning_lines, final_grid = self.calculate_slot_result(wager, self.rtp_modifier, use_luck)
+
+        # Animation (Re-use existing UI logic)
+        embed = discord.Embed(title="🎰 Buffalo Legends", color=discord.Color.gold())
+        embed.description = "🎰 **SPINNING...**"
+        embed.add_field(name="Wager", value=f"{wager} 🪙")
+        if use_luck: embed.set_footer(text="🍀 LUCK ADDED! Better odds active!")
+
+        if getattr(ctx, 'message_to_edit', None):
+             msg = getattr(ctx, 'message_to_edit')
+             await msg.edit(embed=embed, view=None)
+        else:
+             msg = await ctx.send(embed=embed)
+
+        rows, cols = 4, 5
+        for i in range(cols + 1):
+            display_lines = []
+            for r in range(rows):
+                line = []
+                for c in range(cols):
+                    if c < i: line.append(final_grid[r][c])
+                    else: line.append("🔄")
+                display_lines.append(" ".join(line))
+            display_lines.append(f"**Potential Win: {wager * 10}+**")
+            embed.description = "\n".join(display_lines)
+            await msg.edit(embed=embed)
+            await asyncio.sleep(0.5)
+
+        # Final Update
         if total_payout > 0:
             await econ.update_balance(ctx.author.id, total_payout)
             embed.color = discord.Color.green()
@@ -357,6 +323,65 @@ class Casino(commands.Cog):
 
         view = PlayAgainView(ctx, wager, "slots", self.bot)
         await msg.edit(embed=embed, view=view)
+
+    @commands.hybrid_command(name="autoslots", description="Run multiple slot spins automatically (Requires Item)")
+    async def autoslots(self, ctx, wager: int, spins: int):
+        if spins <= 0 or spins > 20: return await ctx.send("Spins must be between 1 and 20.", ephemeral=True)
+        if wager <= 0: return await ctx.send("Wager must be positive.", ephemeral=True)
+
+        # Check Inventory
+        async with aiosqlite.connect("bot_data.db") as db:
+            async with db.execute("SELECT 1 FROM inventory WHERE user_id = ? AND item_name = 'Auto Slot'", (ctx.author.id,)) as cursor:
+                if not await cursor.fetchone():
+                    return await ctx.send("❌ You need the **Auto Slot** item to use this command.", ephemeral=True)
+
+        econ = self.bot.get_cog("Economy")
+        total_cost = wager * spins
+        bal = await econ.get_balance(ctx.author.id)
+
+        if bal < total_cost:
+            return await ctx.send(f"Insufficient funds for {spins} spins. Total cost: {total_cost}", ephemeral=True)
+
+        await ctx.defer()
+
+        # We process spins internally without animation
+        total_won = 0
+        wins_log = []
+
+        # Deduct all upfront? Or per spin? Upfront is safer for async loops
+        await econ.update_balance(ctx.author.id, -total_cost)
+
+        embed = discord.Embed(title="🎰 Auto Slots Running...", description=f"Spinning {spins} times...", color=discord.Color.blue())
+        msg = await ctx.send(embed=embed)
+
+        for i in range(1, spins + 1):
+            win, lines, _ = self.calculate_slot_result(wager, self.rtp_modifier, False) # No Luck item usage in auto for now
+            total_won += win
+            if win > 0:
+                wins_log.append(f"Spin {i}: +{win} ({', '.join(lines)})")
+
+            if i % 5 == 0: # Update progress
+                embed.description = f"Spinning {i}/{spins}..."
+                await msg.edit(embed=embed)
+                await asyncio.sleep(1)
+
+        # Final Result
+        net = total_won - total_cost
+        await econ.update_balance(ctx.author.id, total_won)
+
+        embed.title = "🎰 Auto Slots Complete"
+        embed.color = discord.Color.green() if net >= 0 else discord.Color.red()
+        embed.description = f"**Spins:** {spins}\n**Wager Per Spin:** {wager}\n**Total Cost:** {total_cost}\n**Total Won:** {total_won}\n**Net Profit:** {net:+}"
+
+        if wins_log:
+            # Show top 5 wins or summary
+            log_str = "\n".join(wins_log[:10])
+            if len(wins_log) > 10: log_str += f"\n...and {len(wins_log)-10} more."
+            embed.add_field(name="Wins Log", value=log_str, inline=False)
+        else:
+            embed.add_field(name="Wins Log", value="No wins.", inline=False)
+
+        await msg.edit(embed=embed)
 
     # --- BLACKJACK ---
     @commands.hybrid_command(name="blackjack", description="Play Blackjack")
