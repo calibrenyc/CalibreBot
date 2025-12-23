@@ -245,6 +245,18 @@ class Economy(commands.Cog):
             await db.commit()
         await ctx.send(f"Added {name} ({type_val}) to shop.")
 
+    @shop.command(name="remove", description="Remove an item from the shop (Admin)")
+    @commands.has_permissions(administrator=True)
+    async def shop_remove(self, ctx, item_name: str):
+        async with aiosqlite.connect("bot_data.db") as db:
+            async with db.execute("SELECT 1 FROM shop_items WHERE guild_id = ? AND lower(name) = ?", (ctx.guild.id, item_name.lower())) as cursor:
+                if not await cursor.fetchone():
+                    return await ctx.send("Item not found.", ephemeral=True)
+
+            await db.execute("DELETE FROM shop_items WHERE guild_id = ? AND lower(name) = ?", (ctx.guild.id, item_name.lower()))
+            await db.commit()
+        await ctx.send(f"Removed **{item_name}** from the shop.")
+
     # --- Custom Bets ---
     @commands.hybrid_group(name="bet", description="Betting system")
     async def bet(self, ctx):
@@ -401,8 +413,29 @@ class Economy(commands.Cog):
 
         # Send Challenge
         embed = discord.Embed(title="⚔️ Wager Challenge", description=f"{ctx.author.mention} challenges {opponent.mention} to a wager of **{amount}** coins!", color=discord.Color.red())
-        view = WagerAcceptView(bet_id, opponent.id, amount, ctx.author.id)
-        await ctx.send(f"{opponent.mention}", embed=embed, view=view)
+        view = WagerAcceptView(bet_id, opponent.id, amount, ctx.author.id, self) # Pass self (Cog)
+        msg = await ctx.send(f"{opponent.mention}", embed=embed, view=view)
+        view.message = msg
+
+    @wager.command(name="cancel", description="Cancel a pending wager (Refund)")
+    async def wager_cancel(self, ctx):
+        async with aiosqlite.connect("bot_data.db") as db:
+            db.row_factory = aiosqlite.Row
+            # Find the most recent pending bet by this user
+            async with db.execute("SELECT * FROM pvp_bets WHERE challenger_id = ? AND status = 'PENDING' ORDER BY id DESC LIMIT 1", (ctx.author.id,)) as cursor:
+                bet = await cursor.fetchone()
+
+            if not bet:
+                return await ctx.send("You have no pending wagers to cancel.", ephemeral=True)
+
+            # Refund
+            await self.update_balance(ctx.author.id, bet['amount'])
+
+            # Delete
+            await db.execute("DELETE FROM pvp_bets WHERE id = ?", (bet['id'],))
+            await db.commit()
+
+        await ctx.send(f"✅ Wager #{bet['id']} cancelled. Refunded {bet['amount']} coins.")
 
     @wager.command(name="resolve", description="Resolve an active wager")
     async def wager_resolve(self, ctx):
@@ -440,12 +473,14 @@ class Economy(commands.Cog):
 from discord.ui import View, Button
 
 class WagerAcceptView(View):
-    def __init__(self, bet_id, opponent_id, amount, challenger_id):
+    def __init__(self, bet_id, opponent_id, amount, challenger_id, cog):
         super().__init__(timeout=300)
         self.bet_id = bet_id
         self.opponent_id = opponent_id
         self.amount = amount
         self.challenger_id = challenger_id
+        self.cog = cog # Economy Cog instance
+        self.message = None
 
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.green)
     async def accept(self, interaction, button):
@@ -453,12 +488,11 @@ class WagerAcceptView(View):
             return await interaction.response.send_message("Not your challenge.", ephemeral=True)
 
         # Check Opponent Balance
-        econ = interaction.client.get_cog("Economy")
-        bal = await econ.get_balance(self.opponent_id)
+        bal = await self.cog.get_balance(self.opponent_id)
         if bal < self.amount:
             return await interaction.response.send_message("Insufficient funds to accept.", ephemeral=True)
 
-        await econ.update_balance(self.opponent_id, -self.amount)
+        await self.cog.update_balance(self.opponent_id, -self.amount)
 
         async with aiosqlite.connect("bot_data.db") as db:
             await db.execute("UPDATE pvp_bets SET status = 'ACTIVE' WHERE id = ?", (self.bet_id,))
@@ -474,8 +508,7 @@ class WagerAcceptView(View):
             return await interaction.response.send_message("Not your challenge.", ephemeral=True)
 
         # Refund Challenger
-        econ = interaction.client.get_cog("Economy")
-        await econ.update_balance(self.challenger_id, self.amount)
+        await self.cog.update_balance(self.challenger_id, self.amount)
 
         async with aiosqlite.connect("bot_data.db") as db:
             await db.execute("DELETE FROM pvp_bets WHERE id = ?", (self.bet_id,))
@@ -483,6 +516,20 @@ class WagerAcceptView(View):
 
         await interaction.response.edit_message(content="Wager declined/cancelled. Refunded.", embed=None, view=None)
         self.stop()
+
+    async def on_timeout(self):
+        # Refund Challenger on Timeout
+        await self.cog.update_balance(self.challenger_id, self.amount)
+
+        async with aiosqlite.connect("bot_data.db") as db:
+            await db.execute("DELETE FROM pvp_bets WHERE id = ?", (self.bet_id,))
+            await db.commit()
+
+        if self.message:
+            try:
+                await self.message.edit(content="❌ **Challenge Timed Out.** Refunded.", embed=None, view=None)
+            except:
+                pass
 
 class WagerResolveView(View):
     def __init__(self, bet_id, challenger_id, opponent_id, amount):

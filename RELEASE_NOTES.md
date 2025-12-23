@@ -1,3 +1,12 @@
+# Calibre Search Bot - Version 2.5.1-hotfix Release Notes
+
+**Version 2.5.1 (Hotfix)** adds missing administrative tools for the shop system.
+
+## 🔥 Hotfix Changes
+*   **Shop Management:** Added `/shop remove <item_name>` for Admins to delete items from the server shop.
+
+---
+
 # Calibre Search Bot - Version 2.5 Release Notes
 
 **Version 2.5 (Operation Health)** focuses on cleaning up technical debt, fixing bugs, and revamping core systems for better stability and user experience.
