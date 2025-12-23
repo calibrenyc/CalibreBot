@@ -367,6 +367,30 @@ class Casino(commands.Cog):
 
 # --- HELPER CLASSES ---
 
+class CustomContext:
+    def __init__(self, bot, interaction):
+        self.bot = bot
+        self.interaction = interaction
+        self.author = interaction.user
+        self.guild = interaction.guild
+        self.channel = interaction.channel
+        self.me = interaction.guild.me if interaction.guild else bot.user
+
+    async def send(self, content=None, **kwargs):
+        # Ephemeral handling
+        ephemeral = kwargs.pop('ephemeral', False)
+
+        if not self.interaction.response.is_done():
+            await self.interaction.response.send_message(content, **kwargs, ephemeral=ephemeral)
+            if not ephemeral:
+                return await self.interaction.original_response()
+            return None
+        else:
+            return await self.interaction.followup.send(content, **kwargs, ephemeral=ephemeral, wait=True)
+
+    async def defer(self, ephemeral=False):
+        await self.interaction.response.defer(ephemeral=ephemeral)
+
 class PlayAgainView(View):
     def __init__(self, ctx, wager, game_type, bot):
         super().__init__(timeout=60)
@@ -380,10 +404,11 @@ class PlayAgainView(View):
         if interaction.user != self.ctx.author: return
         self.stop()
 
-        # Create new context from button interaction to prevent expired token issues
-        ctx = await self.bot.get_context(interaction)
+        # Use CustomContext to ensure interaction handling is correct for repeated plays
+        ctx = CustomContext(self.bot, interaction)
         cog = self.bot.get_cog("Casino")
 
+        # Invoke callback with custom context
         if self.game_type == "slots": await cog.slots.callback(cog, ctx, self.wager)
         elif self.game_type == "blackjack": await cog.blackjack.callback(cog, ctx, self.wager)
         elif self.game_type == "highlow": await cog.highlow.callback(cog, ctx, self.wager)
