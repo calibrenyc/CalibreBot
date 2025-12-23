@@ -32,7 +32,7 @@ class TCFC(commands.Cog):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         # Skip check for setup commands
-        if interaction.command.name in ['setup', 'create_tournament', 'create_fight', 'report']:
+        if interaction.command.name in ['setup', 'create_tournament', 'create_fight', 'report', 'reset_fighter', 'void_match']:
             return True
 
         config = await config_manager.get_guild_config(interaction.guild_id)
@@ -253,6 +253,48 @@ class TCFC(commands.Cog):
         view = MatchSelectView(matches, self.bot, self)
         await ctx.send("Select a match to bet on:", view=view, ephemeral=True)
 
+    @tcfc.command(name="reset_fighter", description="Reset a fighter's stats and ELO (Admin Only)")
+    @commands.has_permissions(administrator=True)
+    async def reset_fighter(self, ctx, fighter: discord.Member):
+        async with aiosqlite.connect("bot_data.db") as db:
+            await db.execute("""
+                UPDATE tcfc_fighters
+                SET elo = 1000, wins = 0, losses = 0, kos = 0, rounds_fought = 0, total_damage = 0
+                WHERE user_id = ?
+            """, (fighter.id,))
+            await db.commit()
+        await ctx.send(f"✅ Reset stats for {fighter.mention}.", ephemeral=True)
+
+    @tcfc.command(name="void_match", description="Void a match (Admin Only)")
+    @commands.has_permissions(administrator=True)
+    async def void_match(self, ctx, match_id: int):
+        async with aiosqlite.connect("bot_data.db") as db:
+            db.row_factory = aiosqlite.Row
+            # Check match status
+            async with db.execute("SELECT * FROM tcfc_matches WHERE id = ?", (match_id,)) as cursor:
+                match = await cursor.fetchone()
+
+            if not match: return await ctx.send("Match not found.", ephemeral=True)
+
+            # Refund Bets if Open
+            refund_count = 0
+            if match['status'] == 'OPEN':
+                async with db.execute("SELECT * FROM tcfc_bets WHERE match_id = ?", (match_id,)) as cursor:
+                    bets = await cursor.fetchall()
+
+                econ = self.bot.get_cog("Economy")
+                for bet in bets:
+                    if bet['status'] == 'PENDING':
+                        await econ.update_balance(bet['user_id'], bet['wager'])
+                        await db.execute("UPDATE tcfc_bets SET status = 'VOID' WHERE id = ?", (bet['id'],))
+                        refund_count += 1
+
+            # Update Match Status
+            await db.execute("UPDATE tcfc_matches SET status = 'VOID' WHERE id = ?", (match_id,))
+            await db.commit()
+
+        await ctx.send(f"🚫 Match #{match_id} marked as VOID. Refunded {refund_count} pending bets.", ephemeral=True)
+
 # --- VIEWS ---
 
 class SetupView(View):
@@ -400,48 +442,6 @@ class WagerModalTCFC(Modal):
             await db.commit()
 
         await interaction.response.send_message(f"Bet {amt} on Fighter {self.selection}", ephemeral=True)
-
-    @tcfc.command(name="reset_fighter", description="Reset a fighter's stats and ELO (Admin Only)")
-    @commands.has_permissions(administrator=True)
-    async def reset_fighter(self, ctx, fighter: discord.Member):
-        async with aiosqlite.connect("bot_data.db") as db:
-            await db.execute("""
-                UPDATE tcfc_fighters
-                SET elo = 1000, wins = 0, losses = 0, kos = 0, rounds_fought = 0, total_damage = 0
-                WHERE user_id = ?
-            """, (fighter.id,))
-            await db.commit()
-        await ctx.send(f"✅ Reset stats for {fighter.mention}.", ephemeral=True)
-
-    @tcfc.command(name="void_match", description="Void a match (Admin Only)")
-    @commands.has_permissions(administrator=True)
-    async def void_match(self, ctx, match_id: int):
-        async with aiosqlite.connect("bot_data.db") as db:
-            db.row_factory = aiosqlite.Row
-            # Check match status
-            async with db.execute("SELECT * FROM tcfc_matches WHERE id = ?", (match_id,)) as cursor:
-                match = await cursor.fetchone()
-
-            if not match: return await ctx.send("Match not found.", ephemeral=True)
-
-            # Refund Bets if Open
-            refund_count = 0
-            if match['status'] == 'OPEN':
-                async with db.execute("SELECT * FROM tcfc_bets WHERE match_id = ?", (match_id,)) as cursor:
-                    bets = await cursor.fetchall()
-
-                econ = self.bot.get_cog("Economy")
-                for bet in bets:
-                    if bet['status'] == 'PENDING':
-                        await econ.update_balance(bet['user_id'], bet['wager'])
-                        await db.execute("UPDATE tcfc_bets SET status = 'VOID' WHERE id = ?", (bet['id'],))
-                        refund_count += 1
-
-            # Update Match Status
-            await db.execute("UPDATE tcfc_matches SET status = 'VOID' WHERE id = ?", (match_id,))
-            await db.commit()
-
-        await ctx.send(f"🚫 Match #{match_id} marked as VOID. Refunded {refund_count} pending bets.", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(TCFC(bot))
