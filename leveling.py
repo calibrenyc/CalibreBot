@@ -345,7 +345,20 @@ class Leveling(commands.Cog):
 
         leveled_up, new_level = await self.add_xp(message.guild.id, message.author.id, final_xp)
         if leveled_up:
-            await message.channel.send(f"🎉 {message.author.mention} has reached **Level {new_level}**!")
+            # Check for Level Up Channel
+            channel_id = config.get('level_up_channel_id')
+            channel = None
+            if channel_id:
+                channel = message.guild.get_channel(channel_id)
+
+            if channel:
+                try:
+                    await channel.send(f"🎉 {message.author.mention} has reached **Level {new_level}**!")
+                except:
+                    # Fallback if permission error
+                    await message.channel.send(f"🎉 {message.author.mention} has reached **Level {new_level}**!")
+            else:
+                await message.channel.send(f"🎉 {message.author.mention} has reached **Level {new_level}**!")
 
     def hex_to_rgb(self, hex_code):
         hex_code = hex_code.lstrip('#')
@@ -575,3 +588,53 @@ class Leveling(commands.Cog):
         if leveled_up:
              msg += f"\n🎉 They reached **Level {new_level}**!"
         await ctx.send(msg)
+
+    @commands.hybrid_group(name="leveling", description="Leveling management")
+    async def leveling_group(self, ctx):
+        pass
+
+    @leveling_group.command(name="reset", description="Reset XP and Levels")
+    @discord.app_commands.describe(scope="Reset ALL users or a SPECIFIC user", user="User to reset (if scope is User)")
+    @discord.app_commands.choices(scope=[
+        discord.app_commands.Choice(name="All Users", value="all"),
+        discord.app_commands.Choice(name="Specific User", value="user")
+    ])
+    @commands.has_permissions(administrator=True)
+    async def reset_levels(self, ctx, scope: discord.app_commands.Choice[str], user: discord.Member = None):
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You need Administrator permissions.", ephemeral=True)
+
+        if scope.value == "user":
+            if not user:
+                return await ctx.send("Please specify a user to reset.", ephemeral=True)
+
+            async with aiosqlite.connect("bot_data.db") as db:
+                await db.execute("DELETE FROM user_levels WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, user.id))
+                await db.commit()
+            await ctx.send(f"✅ Reset XP and Level for {user.mention}.", ephemeral=True)
+
+        elif scope.value == "all":
+            # Confirmation
+            view = ResetConfirmView(ctx)
+            await ctx.send("⚠️ **Are you sure?** This will reset **EVERYONE'S** XP and Level in this server.", view=view, ephemeral=True)
+
+class ResetConfirmView(ui.View):
+    def __init__(self, ctx):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+
+    @ui.button(label="Yes, Reset All", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction, button):
+        if interaction.user != self.ctx.author: return
+        await interaction.response.defer()
+
+        async with aiosqlite.connect("bot_data.db") as db:
+            await db.execute("DELETE FROM user_levels WHERE guild_id = ?", (self.ctx.guild.id,))
+            await db.commit()
+
+        await interaction.edit_original_response(content="✅ **All levels have been reset.**", view=None)
+
+    @ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction, button):
+        if interaction.user != self.ctx.author: return
+        await interaction.edit_original_response(content="Action cancelled.", view=None)

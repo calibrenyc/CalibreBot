@@ -113,6 +113,11 @@ class DatabaseManager:
                 await db.execute("ALTER TABLE guild_configs ADD COLUMN update_log_channel_id INTEGER DEFAULT NULL")
             except Exception: pass
 
+            # --- Schema Updates for Config (v2.3.x) ---
+            try:
+                await db.execute("ALTER TABLE guild_configs ADD COLUMN level_up_channel_id INTEGER DEFAULT NULL")
+            except Exception: pass
+
             # --- Schema Updates for TCFC Config (v2.3.5) ---
             try:
                 await db.execute("ALTER TABLE guild_configs ADD COLUMN tcfc_channel_id INTEGER DEFAULT NULL")
@@ -247,6 +252,30 @@ class DatabaseManager:
                 )
             """)
 
+            # 11. Global Config (e.g. RTP)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS global_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+
+            # 12. PvP Bets (Economy)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS pvp_bets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER,
+                    challenger_id INTEGER,
+                    opponent_id INTEGER,
+                    amount INTEGER,
+                    status TEXT DEFAULT 'PENDING', -- PENDING, ACTIVE, RESOLVED, VOID
+                    challenger_vote INTEGER DEFAULT NULL,
+                    opponent_vote INTEGER DEFAULT NULL,
+                    winner_id INTEGER DEFAULT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             await db.commit()
 
     async def migrate_from_json(self):
@@ -293,7 +322,7 @@ class DatabaseManager:
                 return {}
 
     async def update_guild_config(self, guild_id, key, value):
-        valid_columns = ['owner_role_id', 'forum_channel_id', 'log_channel_id', 'muted_role_id', 'allowed_search_channels', 'mod_roles', 'xp_rate', 'update_log_channel_id', 'tcfc_channel_id', 'tcfc_analyst_role_id']
+        valid_columns = ['owner_role_id', 'forum_channel_id', 'log_channel_id', 'muted_role_id', 'allowed_search_channels', 'mod_roles', 'xp_rate', 'update_log_channel_id', 'tcfc_channel_id', 'tcfc_analyst_role_id', 'level_up_channel_id']
         if key not in valid_columns:
             return False
 

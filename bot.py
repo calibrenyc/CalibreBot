@@ -776,7 +776,7 @@ class SetupWizard:
         # Define callbacks for Yes/No view to proceed
         # We need to monkey-patch or handle wait() manually.
         # Easier to just wait() on the view.
-        msg = await self.ctx.send("**Step 3/4:** Do you want to automatically create a **request channel** and **forum**?", view=view)
+        msg = await self.ctx.send("**Step 3/4:** Do you want to automatically create a **request channel**, **forum**, and **level up channel**?", view=view)
         await view.wait()
 
         if view.value:
@@ -785,11 +785,13 @@ class SetupWizard:
                 cat = await self.guild.create_category("Game Bot")
                 req = await self.guild.create_text_channel("game-requests", category=cat)
                 forum = await self.guild.create_forum_channel("Game Threads", category=cat)
+                lvl = await self.guild.create_text_channel("level-ups", category=cat)
 
                 await config_manager.update_guild_config(self.guild.id, 'forum_channel_id', forum.id)
+                await config_manager.update_guild_config(self.guild.id, 'level_up_channel_id', lvl.id)
                 await config_manager.add_to_list(self.guild.id, 'allowed_search_channels', req.id)
 
-                await self.ctx.send(f"Created {req.mention} and {forum.mention}.")
+                await self.ctx.send(f"Created {req.mention}, {forum.mention} and {lvl.mention}.")
             except Exception as e:
                 await self.ctx.send(f"Failed to create channels: {e}")
         else:
@@ -881,6 +883,12 @@ class ConfigGroup(commands.GroupCog, name="config"):
         await interaction.response.send_message(f"Log channel set to {channel.mention}.", ephemeral=True)
         # Log to the new channel
         await log_audit(interaction.guild, f"{interaction.user.mention} set Log Channel to {channel.mention}.")
+
+    @discord.app_commands.command(name="level_channel", description="Set the channel for level up notifications")
+    async def level_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        await config_manager.update_guild_config(interaction.guild_id, 'level_up_channel_id', channel.id)
+        await interaction.response.send_message(f"Level notifications will be sent to {channel.mention}.", ephemeral=True)
+        await log_audit(interaction.guild, f"{interaction.user.mention} set Level Up Channel to {channel.mention}.")
 
     @discord.app_commands.command(name="add_mod", description="Add a role that can manage bot config")
     async def add_mod(self, interaction: discord.Interaction, role: discord.Role):
