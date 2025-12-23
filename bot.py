@@ -21,12 +21,12 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.5.1-hotfix"
+BOT_VERSION = "2.5.2"
 
 CHANGELOG = {
+    "2.5.2": "🏆 **Ladder System Update (v2.5.2)**\n- **Competive Ladders**: New `/ladder` system for custom ELO leagues.\n- **Challenge System**: Fluid PvP challenges with optional wagering.\n- **Reporting**: Mutual match confirmation flow.\n- **Includes Hotfixes**: Shop admin tools and wager safety fixes.",
     "2.5.1-hotfix": "🔥 **Hotfix (v2.5.1)**\n- **Shop**: Added `/shop remove` command for Admins.\n- **Versioning**: Bumped to hotfix release.",
     "2.5": "🏥 **Operation Health (v2.5)**\n- **PvP Wagers**: New `/wager` system replaces legacy bets. Secure escrow and voting resolution.\n- **Casino**: 'Lucky Charm' item now usable in `/slots` for boosted odds. Fixed `set_rtp` persistence.\n- **Leveling**: Added `/leveling reset` (Admin) and Level Up Channel configuration.\n- **Cleanup**: Removed log file clutter and optimized database schema.",
-    "2.4.3": "🔧 **Casino Fixes (v2.4.3)**\n- **Slots**: Fixed payout logic for Wilds and improved animations.\n- **Shop**: Added 'Lucky Charm' item to shop.\n- **System**: Fixed 'Play Again' button crashes.",
     "2.4.2": "🎰 **Casino Visuals & Mechanics (v2.4.2)**\n- **Slots**: New 5x4 Grid, Stake-style animations, Scatter Free Spins, and Wilds.\n- **Visuals**: Large Emoji Cards for Blackjack/Poker.\n- **Mechanics**: Improved Poker & Crash logic.",
     "2.4.1": "🔧 **Inventory Fix (v2.4.1)**\n- Added `/inventory` and `/shop buy` logic for items.\n- Slots now checks for 'Lucky Charm'.",
     "2.4.0": "🎰 **Casino Overhaul (v2.4.0)**\n- **Slots**: New Buffalo style slots with animations and free spin bonus.\n- **Poker**: Added `/poker` (vs Dealer) and `/pvppoker` (Multiplayer Shootout).\n- **Crash**: Added `/crash` (Ride the Line).\n- **Visuals**: Enhanced Blackjack & High/Low with emoji cards.\n- **Economy**: Added `/pay`.",
@@ -1286,7 +1286,8 @@ async def setup_cogs():
     extensions = [
         "sportsbook",
         "casino",
-        "tcfc"
+        "tcfc",
+        "ladders"
     ]
 
     for ext in extensions:

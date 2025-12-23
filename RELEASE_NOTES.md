@@ -1,3 +1,19 @@
+# Calibre Search Bot - Version 2.5.2 Release Notes
+
+**Version 2.5.2** introduces the **Generalized Ladder System** and includes previous hotfixes.
+
+## 🏆 Competitive Ladders
+*   **Custom Leagues:** Admins can create ELO-ranked ladders for any game (e.g., `/ladder create Valorant`).
+*   **Ranked PvP:** Players can challenge each other (`/ladder challenge`) with optional currency wagers.
+*   **Fluid Reporting:** A mutual confirmation system (`/ladder report`) handles match results and ELO updates.
+*   **Leaderboards:** Track top players in every ladder (`/ladder leaderboard`).
+
+## 🛠️ Enhancements & Fixes
+*   **Wager Safety:** Fixed an issue where pending wagers could be lost if the opponent didn't respond. Added `/wager cancel`.
+*   **Shop Admin:** Added `/shop remove` for easier item management.
+
+---
+
 # Calibre Search Bot - Version 2.5.1-hotfix Release Notes
 
 **Version 2.5.1 (Hotfix)** adds missing administrative tools for the shop system.
