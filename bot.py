@@ -21,13 +21,13 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.3.6"
+BOT_VERSION = "2.4.2"
 
 CHANGELOG = {
-    "2.3.6": "🔧 **TCFC Admin Tools (v2.3.6)**\n- Added `/tcfc reset_fighter`: Reset stats/ELO for a user.\n- Added `/tcfc void_match`: Cancel a match and refund pending bets.",
-    "2.3.5": "🛡️ **TCFC Config Update (v2.3.5)**\n- Added `/tcfc setup` for interactive configuration.\n- **Channel Locking**: Restrict TCFC commands to a specific channel.\n- **Analyst Role**: Assign or create a dedicated role for reporting results.",
-    "2.3.3": "✨ **Update v2.3.3**\n- **Help Menu**: Complete overhaul. Commands are now categorized (Sportsbook, Casino, TCFC, etc.) with full lists.\n- **Update Logs**: The bot now details exactly what changed when it updates.\n- **Fixes**: General stability improvements.",
-    "2.3.2": "🥊 **TCFC League Update**\n- Added `/tcfc create_fight` for single ranked matches.\n- Added ELO rating system and betting integration."
+    "2.4.2": "🎰 **Casino Visuals & Mechanics (v2.4.2)**\n- **Slots**: New 5x4 Grid, Stake-style animations, Scatter Free Spins, and Wilds.\n- **Visuals**: Large Emoji Cards for Blackjack/Poker.\n- **Mechanics**: Improved Poker & Crash logic.",
+    "2.4.1": "🔧 **Inventory Fix (v2.4.1)**\n- Added `/inventory` and `/shop buy` logic for items.\n- Slots now checks for 'Lucky Charm'.",
+    "2.4.0": "🎰 **Casino Overhaul (v2.4.0)**\n- **Slots**: New Buffalo style slots with animations and free spin bonus.\n- **Poker**: Added `/poker` (vs Dealer) and `/pvppoker` (Multiplayer Shootout).\n- **Crash**: Added `/crash` (Ride the Line).\n- **Visuals**: Enhanced Blackjack & High/Low with emoji cards.\n- **Economy**: Added `/pay`.",
+    "2.3.6": "🔧 **TCFC Admin Tools (v2.3.6)**\n- Added `/tcfc reset_fighter`: Reset stats/ELO for a user.\n- Added `/tcfc void_match`: Cancel a match and refund pending bets."
 }
 
 # Setup Bot

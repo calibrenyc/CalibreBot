@@ -178,6 +178,17 @@ class DatabaseManager:
                 )
             """)
 
+            # 7. User Inventory (Added v2.4.1)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS inventory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    guild_id INTEGER,
+                    item_name TEXT,
+                    purchase_date DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # 8. Active Bets
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS active_bets (
