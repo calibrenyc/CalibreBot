@@ -102,11 +102,37 @@ def evaluate_hand(cards):
     # 9. High Card
     return ranks[0], "High Card"
 
+class LuckChoiceView(View):
+    def __init__(self, ctx, wager, cog):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        self.wager = wager
+        self.cog = cog
+
+    @discord.ui.button(label="Spin with Luck (Consume 1 Charm)", style=discord.ButtonStyle.success, emoji="🍀")
+    async def use_luck(self, interaction, button):
+        if interaction.user != self.ctx.author: return
+        self.stop()
+        # Pass the message so we can edit it
+        self.ctx.message_to_edit = interaction.message
+        await interaction.response.defer()
+        await self.cog.run_slots(self.ctx, self.wager, use_luck=True)
+
+    @discord.ui.button(label="Spin Normal", style=discord.ButtonStyle.secondary, emoji="🔄")
+    async def normal(self, interaction, button):
+        if interaction.user != self.ctx.author: return
+        self.stop()
+        self.ctx.message_to_edit = interaction.message
+        await interaction.response.defer()
+        await self.cog.run_slots(self.ctx, self.wager, use_luck=False)
+
 class Casino(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.rtp_modifier = 1.0
-        self.bot.loop.create_task(self.load_rtp())
+
+    async def cog_load(self):
+        await self.load_rtp()
 
     async def load_rtp(self):
         async with aiosqlite.connect("bot_data.db") as db:
@@ -331,30 +357,6 @@ class Casino(commands.Cog):
 
         view = PlayAgainView(ctx, wager, "slots", self.bot)
         await msg.edit(embed=embed, view=view)
-
-class LuckChoiceView(View):
-    def __init__(self, ctx, wager, cog):
-        super().__init__(timeout=60)
-        self.ctx = ctx
-        self.wager = wager
-        self.cog = cog
-
-    @discord.ui.button(label="Spin with Luck (Consume 1 Charm)", style=discord.ButtonStyle.success, emoji="🍀")
-    async def use_luck(self, interaction, button):
-        if interaction.user != self.ctx.author: return
-        self.stop()
-        # Pass the message so we can edit it
-        self.ctx.message_to_edit = interaction.message
-        await interaction.response.defer()
-        await self.cog.run_slots(self.ctx, self.wager, use_luck=True)
-
-    @discord.ui.button(label="Spin Normal", style=discord.ButtonStyle.secondary, emoji="🔄")
-    async def normal(self, interaction, button):
-        if interaction.user != self.ctx.author: return
-        self.stop()
-        self.ctx.message_to_edit = interaction.message
-        await interaction.response.defer()
-        await self.cog.run_slots(self.ctx, self.wager, use_luck=False)
 
     # --- BLACKJACK ---
     @commands.hybrid_command(name="blackjack", description="Play Blackjack")
