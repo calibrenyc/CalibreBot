@@ -21,11 +21,11 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.3.5"
+BOT_VERSION = "2.3.6"
 
 CHANGELOG = {
+    "2.3.6": "🔧 **TCFC Admin Tools (v2.3.6)**\n- Added `/tcfc reset_fighter`: Reset stats/ELO for a user.\n- Added `/tcfc void_match`: Cancel a match and refund pending bets.",
     "2.3.5": "🛡️ **TCFC Config Update (v2.3.5)**\n- Added `/tcfc setup` for interactive configuration.\n- **Channel Locking**: Restrict TCFC commands to a specific channel.\n- **Analyst Role**: Assign or create a dedicated role for reporting results.",
-    "2.3.4": "🛠️ **Fix v2.3.4**\n- **Help Menu Fix**: Resolved issue where some command lists (Fun, Moderation) were empty. All commands should now appear.\n- **Bot Stability**: Minor tweaks.",
     "2.3.3": "✨ **Update v2.3.3**\n- **Help Menu**: Complete overhaul. Commands are now categorized (Sportsbook, Casino, TCFC, etc.) with full lists.\n- **Update Logs**: The bot now details exactly what changed when it updates.\n- **Fixes**: General stability improvements.",
     "2.3.2": "🥊 **TCFC League Update**\n- Added `/tcfc create_fight` for single ranked matches.\n- Added ELO rating system and betting integration."
 }
