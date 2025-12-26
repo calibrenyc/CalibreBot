@@ -36,6 +36,19 @@ class ArkShop(commands.Cog):
 
         await ctx.send(f"Ark config updated!\nChannel: {channel.mention}\nRCON: {rcon_ip}:{rcon_port}", ephemeral=True)
 
+    @ark.command(name="rcon", description="Send a raw RCON command to the configured server (Admin)")
+    @commands.has_permissions(administrator=True)
+    async def ark_rcon(self, ctx, command: str):
+        config = await self.get_ark_config(ctx.guild.id)
+        if not config:
+            return await ctx.send("Ark config not found. Run `/ark config` first.", ephemeral=True)
+
+        await ctx.defer(ephemeral=True)
+        adapter = RCONAdapter(config['rcon_ip'], config['rcon_port'], config['rcon_password'])
+        response = await adapter.send_command(command)
+
+        await ctx.send(f"**Sent:** `{command}`\n**Response:** `{response}`", ephemeral=True)
+
     # --- Shop Management ---
     @ark.command(name="add_item", description="Add an item to the Ark Shop (Admin)")
     @commands.has_permissions(administrator=True)
@@ -185,6 +198,8 @@ class ArkShopSelect(Select):
 
         # Send RCON
         command = item['command'].replace("{steam_id}", steam_id)
+
+        logger.info(f"Ark Shop Debug: Sending RCON Command: '{command}'")
 
         adapter = RCONAdapter(config['rcon_ip'], config['rcon_port'], config['rcon_password'])
         response = await adapter.send_command(command)
