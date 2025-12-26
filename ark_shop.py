@@ -44,6 +44,20 @@ class ArkShop(commands.Cog):
             return await ctx.send("Ark config not found. Run `/ark config` first.", ephemeral=True)
 
         await ctx.defer(ephemeral=True)
+
+        # Handle placeholder replacement for admin testing
+        if "{steam_id}" in command:
+            async with aiosqlite.connect("bot_data.db") as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute("SELECT platform_id FROM game_links WHERE user_id = ? AND game_key = 'ARK'", (ctx.author.id,)) as cursor:
+                    link = await cursor.fetchone()
+
+            if link:
+                steam_id = link['platform_id']
+                command = command.replace("{steam_id}", steam_id)
+            else:
+                return await ctx.send("Error: You used `{steam_id}` but you are not registered. Run `/registerark <id>` first.", ephemeral=True)
+
         adapter = RCONAdapter(config['rcon_ip'], config['rcon_port'], config['rcon_password'])
         response = await adapter.send_command(command)
 
