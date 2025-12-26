@@ -1259,6 +1259,7 @@ from tracking import Tracking
 from leveling import Leveling
 from economy import Economy
 from birthdays import Birthdays
+from ark_shop import ArkShop
 
 async def setup_cogs():
     logger.info("--- Loading Cogs ---")
@@ -1272,7 +1273,8 @@ async def setup_cogs():
         (Tracking(bot), "Tracking"),
         (Leveling(bot), "Leveling"),
         (Economy(bot), "Economy"),
-        (Birthdays(bot), "Birthdays")
+        (Birthdays(bot), "Birthdays"),
+        (ArkShop(bot), "ArkShop")
     ]
 
     for cog_instance, name in direct_cogs:
@@ -1363,6 +1365,7 @@ class HelpSelect(Select):
             cmds.extend(get_cmds("Fun"))
             cmds.extend(get_cmds("Birthdays"))
             cmds.extend(get_cmds("GameSearch"))
+            cmds.extend(get_cmds("ArkShop"))
 
         elif val == "Configuration":
             cmds = get_cmds("config")

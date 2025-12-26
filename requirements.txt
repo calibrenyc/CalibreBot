@@ -6,3 +6,4 @@ cloudscraper
 Pillow
 aiosqlite
 colorama
+mcrcon
