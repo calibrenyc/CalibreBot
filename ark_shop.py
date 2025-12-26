@@ -200,4 +200,9 @@ class ArkShopSelect(Select):
         # Logging
         logger.info(f"Ark Shop Buy: User {interaction.user.id} ({steam_id}) bought {item['name']}. CMD: {command}. RESP: {response}")
 
-        await interaction.followup.send(f"✅ Purchased **{item['name']}**!\nServer Response: `{response}`")
+        # Clean up response for user
+        display_response = response
+        if response == "Command Sent (No Output)" or "Server received, But no response" in response:
+            display_response = "Command Sent (No output from server)"
+
+        await interaction.followup.send(f"✅ Purchased **{item['name']}**!\nServer Response: `{display_response}`")
