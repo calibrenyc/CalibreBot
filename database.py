@@ -331,36 +331,6 @@ class DatabaseManager:
                 )
             """)
 
-            # 14. Ark/Game Shop Config (v3.0)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS ark_config (
-                    guild_id INTEGER PRIMARY KEY,
-                    channel_id INTEGER,
-                    rcon_ip TEXT,
-                    rcon_port INTEGER,
-                    rcon_password TEXT
-                )
-            """)
-
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS game_links (
-                    user_id INTEGER,
-                    game_key TEXT, -- 'ARK'
-                    platform_id TEXT, -- SteamID
-                    PRIMARY KEY (user_id, game_key)
-                )
-            """)
-
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS ark_shop_items (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id INTEGER,
-                    name TEXT,
-                    price INTEGER,
-                    command TEXT
-                )
-            """)
-
             await db.commit()
 
     async def migrate_from_json(self):

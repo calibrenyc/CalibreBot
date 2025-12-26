@@ -21,10 +21,9 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.6"
+BOT_VERSION = "2.5.2"
 
 CHANGELOG = {
-    "2.6": "🦖 **The Ark Update (v2.6)**\n- **Ark Survival Ascended Shop**: New in-game shop integration!\n- **RCON Integration**: Items purchased in Discord are delivered instantly to the game server.\n- **User Linking**: Link your Steam ID via `/registerark`.\n- **Admin Tools**: New `/ark config` and `/ark rcon` commands for easy setup and testing.",
     "2.5.2": "🏆 **Ladder System Update (v2.5.2)**\n- **Competive Ladders**: New `/ladder` system for custom ELO leagues.\n- **Challenge System**: Fluid PvP challenges with optional wagering.\n- **Reporting**: Mutual match confirmation flow.\n- **Includes Hotfixes**: Shop admin tools and wager safety fixes.",
     "2.5": "🏥 **Operation Health (v2.5)**\n- **PvP Wagers**: New `/wager` system replaces legacy bets. Secure escrow and voting resolution.\n- **Casino**: 'Lucky Charm' item now usable in `/slots` for boosted odds. Fixed `set_rtp` persistence.\n- **Leveling**: Added `/leveling reset` (Admin) and Level Up Channel configuration.\n- **Cleanup**: Removed log file clutter and optimized database schema.",
     "2.4.2": "🎰 **Casino Visuals & Mechanics (v2.4.2)**\n- **Slots**: New 5x4 Grid, Stake-style animations, Scatter Free Spins, and Wilds.\n- **Visuals**: Large Emoji Cards for Blackjack/Poker.\n- **Mechanics**: Improved Poker & Crash logic.",
@@ -1259,7 +1258,6 @@ from tracking import Tracking
 from leveling import Leveling
 from economy import Economy
 from birthdays import Birthdays
-from ark_shop import ArkShop
 
 async def setup_cogs():
     logger.info("--- Loading Cogs ---")
@@ -1273,8 +1271,7 @@ async def setup_cogs():
         (Tracking(bot), "Tracking"),
         (Leveling(bot), "Leveling"),
         (Economy(bot), "Economy"),
-        (Birthdays(bot), "Birthdays"),
-        (ArkShop(bot), "ArkShop")
+        (Birthdays(bot), "Birthdays")
     ]
 
     for cog_instance, name in direct_cogs:
@@ -1365,7 +1362,6 @@ class HelpSelect(Select):
             cmds.extend(get_cmds("Fun"))
             cmds.extend(get_cmds("Birthdays"))
             cmds.extend(get_cmds("GameSearch"))
-            cmds.extend(get_cmds("ArkShop"))
 
         elif val == "Configuration":
             cmds = get_cmds("config")
