@@ -161,17 +161,19 @@ def search_fitgirl(query):
 def search_rexagames(query):
     """
     Searches rexagames.com for the query.
+    Searches 'All Content' to find both Files and Topics.
     """
     results = []
     logger.info(f"[Scraper] Searching RexaGames for '{query}'...")
+    seen_links = set()
 
     try:
         scraper = cloudscraper.create_scraper()
 
-        # https://rexagames.com/search/?q={query}&type=downloads_file&quick=1
+        # Search "All Content" by omitting 'type'
+        # https://rexagames.com/search/?q={query}&quick=1
         params = {
             'q': query,
-            'type': 'downloads_file',
             'quick': 1
         }
 
@@ -187,19 +189,33 @@ def search_rexagames(query):
 
         for item in items:
             try:
-                # Title is in h2[data-ips-hook="itemTitle"] > a
+                # Title can be in itemTitle (Files) or commentTitle (Topics/Replies)
                 title_tag = item.select_one('h2[data-ips-hook="itemTitle"] > a')
+                if not title_tag:
+                    title_tag = item.select_one('h2[data-ips-hook="commentTitle"] > a')
+
                 if not title_tag:
                     continue
 
                 raw_title = title_tag.get_text(strip=True)
                 link = title_tag['href']
 
+                # Deduplication (sometimes multiple posts link to same topic/page)
+                if link in seen_links:
+                    continue
+
+                # STRICT FILTERING
+                # We only want "releases", which usually have "Free Download" or "Online Fix" in the title.
+                # We filter OUT "Game Request" or generic titles.
+                if "free download" not in raw_title.lower() and "online fix" not in raw_title.lower():
+                    continue
+
                 title = clean_title(raw_title)
 
                 if not title:
                     continue
 
+                seen_links.add(link)
                 results.append({
                     "title": title,
                     "link": link,
@@ -227,6 +243,6 @@ if __name__ == "__main__":
     for r in fg_res[:3]:
         logger.info(r)
 
-    rexa_res = search_rexagames("Infect")
+    rexa_res = search_rexagames("Town to City")
     for r in rexa_res[:3]:
         logger.info(r)
