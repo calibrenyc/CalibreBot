@@ -338,73 +338,31 @@ class ThreadExistsView(View):
             except:
                 pass
 
-class SearchResultSelect(Select):
-    def __init__(self, results, original_interaction_user):
-        # Limit to 24 options to leave room for "None of the above" (Discord limit 25)
+class BaseGameSelect(Select):
+    """
+    Base class for game selection dropdowns.
+    Handles the thread creation logic common to all sources.
+    """
+    def __init__(self, results, original_user, placeholder):
+        # Limit to 25 options
         options = []
-        for i, res in enumerate(results[:24]):
+        for i, res in enumerate(results[:25]):
             # Truncate title if too long
-            label = res['title'][:95] + "..." if len(res['title']) > 95 else res['title']
-            description = f"Source: {res['source']}"
+            label = res['title'][:100]
+            # Use value as index
             options.append(discord.SelectOption(
                 label=label, 
-                description=description, 
                 value=str(i)
             ))
         
-        # Add "None of the above" option
-        options.append(discord.SelectOption(
-            label="None of the options above",
-            description="Search again with a specific name",
-            value="none_of_above",
-            emoji="❌"
-        ))
-
-        super().__init__(placeholder="Select a game to create a thread...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options)
         self.results = results
-        self.original_user = original_interaction_user
+        self.original_user = original_user
 
     async def callback(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
-            selected_value = self.values[0]
-
-            # Handle "None of the above"
-            if selected_value == "none_of_above":
-                # Delete the original dropdown message to clean up
-                if interaction.message:
-                    await interaction.message.delete()
-                else:
-                    await interaction.delete_original_response()
-
-                # Send prompt for new search
-                await interaction.followup.send(
-                    f"{self.original_user.mention} Please type the **exact** game title you are looking for below.",
-                    ephemeral=True
-                )
-
-                def check(m):
-                    return m.author == self.original_user and m.channel == interaction.channel
-
-                try:
-                    # Wait for user input (30 seconds timeout)
-                    msg = await bot.wait_for('message', check=check, timeout=30.0)
-
-                    # Delete the user's input message to keep channel clean
-                    try:
-                        await msg.delete()
-                    except:
-                        pass
-
-                    # Trigger search again with new query
-                    new_query = msg.content
-                    await perform_search(interaction, new_query, self.original_user)
-
-                except asyncio.TimeoutError:
-                    await interaction.followup.send("Search timed out. Please try again.", ephemeral=True)
-                return
-
-            selected_index = int(selected_value)
+            selected_index = int(self.values[0])
             selected_result = self.results[selected_index]
             
             # Truncate title to 100 chars for Discord Thread Name limit
@@ -433,7 +391,6 @@ class SearchResultSelect(Select):
                     logger.error(f"Invalid FORUM_CHANNEL_ID: {forum_channel_id}")
             
             # If no forum channel configured, fallback to current channel IF allowed?
-            # User requirement 3 says: "if no configured channel is set it will alert you... and not post anywhere"
             if not destination_channel:
                  await log_error(interaction.guild, f"User {interaction.user} tried to create a thread but no Forum Channel is configured.")
                  await interaction.followup.send("Error: No Forum Channel configured for this server. Please contact an admin.", ephemeral=True)
@@ -469,7 +426,6 @@ class SearchResultSelect(Select):
             # --- CREATE NEW THREAD ---
             logger.info(f"Creating thread for '{thread_name}' in {destination_channel.name} ({destination_channel.type})...")
             
-            thread = None
             message_content = f"{self.original_user.mention} Here is the link you requested:\n{selected_result['link']}"
 
             if isinstance(destination_channel, discord.ForumChannel):
@@ -503,7 +459,6 @@ class SearchResultSelect(Select):
                     # If it's ephemeral or otherwise special, edit it away
                     await interaction.followup.edit_message(message_id=interaction.message.id, content="Request fulfilled.", view=None)
             except Exception as e:
-                # Fallback if delete fails (e.g. ephemeral permissions or state)
                 try:
                     await interaction.followup.edit_message(message_id=interaction.message.id, content="Request fulfilled.", view=None)
                 except:
@@ -516,10 +471,73 @@ class SearchResultSelect(Select):
             except:
                 pass
 
-class SearchView(View):
-    def __init__(self, results, original_user):
-        super().__init__()
-        self.add_item(SearchResultSelect(results, original_user))
+class NoneOfAboveSelect(Select):
+    def __init__(self, original_user):
+        options = [
+            discord.SelectOption(
+                label="None of the options above",
+                description="Search again with a specific name",
+                value="none_of_above",
+                emoji="❌"
+            )
+        ]
+        super().__init__(placeholder="Can't find your game?", min_values=1, max_values=1, options=options)
+        self.original_user = original_user
+
+    async def callback(self, interaction: discord.Interaction):
+        # Delete the original dropdown message to clean up
+        if interaction.message:
+            try: await interaction.message.delete()
+            except: pass
+        else:
+            try: await interaction.delete_original_response()
+            except: pass
+
+        # Send prompt for new search
+        await interaction.response.send_message(
+            f"{self.original_user.mention} Please type the **exact** game title you are looking for below.",
+            ephemeral=True
+        )
+
+        def check(m):
+            return m.author == self.original_user and m.channel == interaction.channel
+
+        try:
+            # Wait for user input (30 seconds timeout)
+            msg = await bot.wait_for('message', check=check, timeout=30.0)
+
+            # Delete the user's input message to keep channel clean
+            try:
+                await msg.delete()
+            except:
+                pass
+
+            # Trigger search again with new query
+            new_query = msg.content
+            await perform_search(interaction, new_query, self.original_user)
+
+        except asyncio.TimeoutError:
+            await interaction.followup.send("Search timed out. Please try again.", ephemeral=True)
+
+class MultiSourceSearchView(View):
+    def __init__(self, online_fix, fitgirl, rexa, original_user):
+        super().__init__(timeout=180)
+
+        # Add Online Fix Select
+        if online_fix:
+            self.add_item(BaseGameSelect(online_fix, original_user, "Select from Online Fix"))
+
+        # Add FitGirl Select
+        if fitgirl:
+            self.add_item(BaseGameSelect(fitgirl, original_user, "Select from FitGirl Repacks"))
+
+        # Add RexaGames Select
+        if rexa:
+            self.add_item(BaseGameSelect(rexa, original_user, "Select from RexaGames"))
+
+        # Add "None of the above" as a separate small dropdown or button?
+        # A select is fine, keeps UI consistent.
+        self.add_item(NoneOfAboveSelect(original_user))
 
 async def log_audit(guild, message, color=discord.Color.blue()):
     """
@@ -613,40 +631,23 @@ async def perform_search(interaction_or_ctx, query, user):
     logger.info(f"Performing search for '{query}'...")
 
     try:
-        # Run scrapers
+        # Run scrapers concurrently
         # Note: We need 'bot' here. Since this is outside class, we use the global 'bot' instance.
         online_fix_results = await bot.loop.run_in_executor(None, scrapers.search_online_fix, query)
         fitgirl_results = await bot.loop.run_in_executor(None, scrapers.search_fitgirl, query)
         rexagames_results = await bot.loop.run_in_executor(None, scrapers.search_rexagames, query)
 
-        all_results = online_fix_results + fitgirl_results + rexagames_results
-        logger.info(f"Total results found: {len(all_results)}")
+        total_results = len(online_fix_results) + len(fitgirl_results) + len(rexagames_results)
+        logger.info(f"Total results found: {total_results}")
 
-        # Filter Logic
-        strict_results = []
-        clean_query = query.strip().lower()
-
-        for res in all_results:
-            if clean_query in res['title'].lower():
-                strict_results.append(res)
-
-        final_results = []
-        msg_content = ""
-
-        if strict_results:
-            final_results = strict_results
-            msg_content = f"Found {len(final_results)} results for '{query}':"
-        elif all_results:
-            final_results = all_results
-            msg_content = f"Hey here are similar titles found with your search '{query}':"
-        else:
-             # No results at all
+        if total_results == 0:
             await send_msg(f"No results found for '{query}'.")
             return
 
-        # Pass user so we know who to tag in the thread
-        view = SearchView(final_results, user)
-        await send_msg(msg_content, view=view)
+        # Prepare View
+        view = MultiSourceSearchView(online_fix_results, fitgirl_results, rexagames_results, user)
+
+        await send_msg(f"Found {total_results} results for '{query}'. Please select a source:", view=view)
 
         logger.success("Response sent to user.")
 
