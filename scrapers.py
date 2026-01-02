@@ -7,6 +7,7 @@ import logger
 # --- Configuration ---
 ONLINE_FIX_URL = "https://online-fix.me/index.php?do=search"
 FITGIRL_URL = "https://fitgirl-repacks.site/"
+REXAGAMES_URL = "https://rexagames.com/search/"
 
 BLACKLIST_TITLES = {
     "Gameranger",
@@ -28,6 +29,14 @@ def clean_title(title):
     title = re.sub(r'\s+по сети', '', title, flags=re.IGNORECASE)
     title = re.sub(r'\s+po seti', '', title, flags=re.IGNORECASE)
     
+    # Remove "Free Download", "Online Fix" (case insensitive)
+    title = re.sub(r'\s+Free Download', '', title, flags=re.IGNORECASE)
+    title = re.sub(r'\s+Online Fix', '', title, flags=re.IGNORECASE)
+
+    # Remove version info in parenthesis e.g. (v1.0.0...) or (Build...)
+    # This regex looks for (v... ) or (Build... )
+    title = re.sub(r'\s+\((v|build).*?\)', '', title, flags=re.IGNORECASE)
+
     # Remove excessive whitespace
     title = " ".join(title.split())
     
@@ -149,6 +158,63 @@ def search_fitgirl(query):
     logger.info(f"[Scraper] FitGirl found {len(results)} results.")
     return results
 
+def search_rexagames(query):
+    """
+    Searches rexagames.com for the query.
+    """
+    results = []
+    logger.info(f"[Scraper] Searching RexaGames for '{query}'...")
+
+    try:
+        scraper = cloudscraper.create_scraper()
+
+        # https://rexagames.com/search/?q={query}&type=downloads_file&quick=1
+        params = {
+            'q': query,
+            'type': 'downloads_file',
+            'quick': 1
+        }
+
+        response = scraper.get(REXAGAMES_URL, params=params)
+        if response.status_code != 200:
+            logger.error(f"[Scraper] RexaGames search failed with status: {response.status_code}")
+            return results
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Results are in li.ipsStreamItem
+        items = soup.select("li.ipsStreamItem")
+
+        for item in items:
+            try:
+                # Title is in h2[data-ips-hook="itemTitle"] > a
+                title_tag = item.select_one('h2[data-ips-hook="itemTitle"] > a')
+                if not title_tag:
+                    continue
+
+                raw_title = title_tag.get_text(strip=True)
+                link = title_tag['href']
+
+                title = clean_title(raw_title)
+
+                if not title:
+                    continue
+
+                results.append({
+                    "title": title,
+                    "link": link,
+                    "source": "rexagames.com"
+                })
+            except Exception as e:
+                logger.error(f"[Scraper] Error parsing rexagames item: {e}")
+                continue
+
+    except Exception as e:
+        logger.error(f"[Scraper] Error searching rexagames: {e}")
+
+    logger.info(f"[Scraper] RexaGames found {len(results)} results.")
+    return results
+
 if __name__ == "__main__":
     # Test execution
     logger.info("Testing Scrapers...")
@@ -159,4 +225,8 @@ if __name__ == "__main__":
         
     fg_res = search_fitgirl("cyberpunk")
     for r in fg_res[:3]:
+        logger.info(r)
+
+    rexa_res = search_rexagames("Infect")
+    for r in rexa_res[:3]:
         logger.info(r)

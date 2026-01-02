@@ -21,9 +21,10 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # but we keep OWNER_ROLE_ID as a fallback or for global admin commands.
 OWNER_ROLE_ID = os.getenv('OWNER_ROLE_ID')
 
-BOT_VERSION = "2.5.2"
+BOT_VERSION = "2.6.0"
 
 CHANGELOG = {
+    "2.6.0": "🔎 **Expanded Search (v2.6.0)**\n- **New Source**: Added `rexagames.com` to game search results.\n- **Search Improvements**: Better filtering and source categorization.\n- **Includes Hotfixes**: Fixed minor scraper issues.",
     "2.5.2": "🏆 **Ladder System Update (v2.5.2)**\n- **Competive Ladders**: New `/ladder` system for custom ELO leagues.\n- **Challenge System**: Fluid PvP challenges with optional wagering.\n- **Reporting**: Mutual match confirmation flow.\n- **Includes Hotfixes**: Shop admin tools and wager safety fixes.",
     "2.5": "🏥 **Operation Health (v2.5)**\n- **PvP Wagers**: New `/wager` system replaces legacy bets. Secure escrow and voting resolution.\n- **Casino**: 'Lucky Charm' item now usable in `/slots` for boosted odds. Fixed `set_rtp` persistence.\n- **Leveling**: Added `/leveling reset` (Admin) and Level Up Channel configuration.\n- **Cleanup**: Removed log file clutter and optimized database schema.",
     "2.4.2": "🎰 **Casino Visuals & Mechanics (v2.4.2)**\n- **Slots**: New 5x4 Grid, Stake-style animations, Scatter Free Spins, and Wilds.\n- **Visuals**: Large Emoji Cards for Blackjack/Poker.\n- **Mechanics**: Improved Poker & Crash logic.",
@@ -616,8 +617,9 @@ async def perform_search(interaction_or_ctx, query, user):
         # Note: We need 'bot' here. Since this is outside class, we use the global 'bot' instance.
         online_fix_results = await bot.loop.run_in_executor(None, scrapers.search_online_fix, query)
         fitgirl_results = await bot.loop.run_in_executor(None, scrapers.search_fitgirl, query)
+        rexagames_results = await bot.loop.run_in_executor(None, scrapers.search_rexagames, query)
 
-        all_results = online_fix_results + fitgirl_results
+        all_results = online_fix_results + fitgirl_results + rexagames_results
         logger.info(f"Total results found: {len(all_results)}")
 
         # Filter Logic
